@@ -332,7 +332,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                             child: Text(
                               _glbReport == null
                                   ? 'Verificando 01_sala_principal.glb...'
-                                  : 'Asset 3D: ${_glbReport!.assetPath} (glTF v${_glbReport!.version} • ${_glbReport!.byteLength} B • Mobile Ready)',
+                                  : 'Asset 3D: ${_glbReport!.assetPath} (glTF v${_glbReport!.version} • ${_glbReport!.byteLength} B • ${_glbReport!.vertexCount} vértices / ${_glbReport!.triangleCount} polígonos • Mobile Ready)',
                               style: const TextStyle(
                                 color: Colors.white70,
                                 fontSize: 11.5,
@@ -462,6 +462,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                 activeHotspot: _nearbyHotspot,
                 cameraPitch: _cameraPitch,
                 cameraZoom: _cameraZoom,
+                glbReport: _glbReport,
                 onHotspotTapped: _handleHotspotAction,
                 onAvatarTapped: (AvatarRoomNode tappedNode) {
                   if (tappedNode.isLocalPlayer) {

@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import '../../../core/models/shest_models.dart';
 import '../avatar/avatar_node.dart';
 import '../movement/room_physics_controller.dart';
+import 'glb_inspector.dart';
 
 /// Visor 3D Interactivo de la Sala Principal de WordVerse (Fases 2, 5, 6, 7, 12, 27).
 /// Renderiza en perspectiva 3D:
+/// - Malla 3D decodificada directamente desde `assets/models/01_sala_principal.glb`
 /// - Escenario, piso reticulado, iluminación ambiental y paredes de colisión
 /// - Punto de Spawn (`02 — Hotspots, colisiones y spawn`)
 /// - Mesa central de negocios con colisión activa
@@ -23,6 +25,7 @@ class Room3DViewport extends StatelessWidget {
     required this.cameraZoom,
     required this.onAvatarTapped,
     required this.onHotspotTapped,
+    this.glbReport,
   });
 
   final AvatarRoomNode localAvatar;
@@ -32,8 +35,9 @@ class Room3DViewport extends StatelessWidget {
   final double cameraZoom;
   final ValueChanged<AvatarRoomNode> onAvatarTapped;
   final ValueChanged<HotspotKind> onHotspotTapped;
+  final GlbOptimizationReport? glbReport;
 
-  /// Proyecta una coordenada 3D normalizada (x, z) en la sala al lienzo 2D con perspectiva.
+  /// Proyecta una coordenada 3D normalizada (x, z) en el plano del piso al lienzo 2D.
   static Offset projectToScreen(
     double normX,
     double normZ,
@@ -41,14 +45,33 @@ class Room3DViewport extends StatelessWidget {
     double pitch = 0.62,
     double zoom = 1.0,
   }) {
+    return project3DToScreen(
+      normX,
+      0.0,
+      normZ,
+      size,
+      pitch: pitch,
+      zoom: zoom,
+    );
+  }
+
+  /// Proyecta un vértice 3D completo (x, y, z) incluyendo su altura `normY` en perspectiva.
+  static Offset project3DToScreen(
+    double normX,
+    double normY,
+    double normZ,
+    Size size, {
+    double pitch = 0.62,
+    double zoom = 1.0,
+  }) {
     final double cx = size.width * 0.5;
-    final double cy = size.height * 0.50;
+    final double cy = size.height * 0.52;
     final double baseScale = math.min(size.width, size.height) * 0.42 * zoom;
 
-    // Efecto de perspectiva: los objetos más cercanos (Z positivo) se ven más anchos
     final double depthFactor = 1.0 + (normZ * 0.28);
     final double screenX = cx + (normX * baseScale * depthFactor);
-    final double screenY = cy + (normZ * baseScale * pitch);
+    final double elevationPx = normY * baseScale * 0.85 * depthFactor;
+    final double screenY = cy + (normZ * baseScale * pitch) - elevationPx;
     return Offset(screenX, screenY);
   }
 
@@ -61,7 +84,6 @@ class Room3DViewport extends StatelessWidget {
           constraints.maxHeight,
         );
 
-        // Ordenar avatares por profundidad Z (pintar primero los más lejanos)
         final List<AvatarRoomNode> allAvatars = <AvatarRoomNode>[
           ...remoteAvatars,
           localAvatar,
@@ -70,13 +92,14 @@ class Room3DViewport extends StatelessWidget {
         return Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
-            // 1. Escenario 3D (Piso, Iluminación, Paredes, Spawn y Mesa de Negocios)
+            // 1. Escenario 3D + Malla binaria .GLB (Paredes 3D, Mesa Octogonal, Piso, Spawn)
             Positioned.fill(
               child: CustomPaint(
                 painter: _Room3DScenePainter(
                   pitch: cameraPitch,
                   zoom: cameraZoom,
                   activeHotspot: activeHotspot,
+                  glbReport: glbReport,
                 ),
               ),
             ),
@@ -185,7 +208,6 @@ class Room3DViewport extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            // Burbuja de Emote activo (Fase 15)
             if (node.activeEmote != null)
               Container(
                 margin: const EdgeInsets.only(bottom: 3),
@@ -203,8 +225,6 @@ class Room3DViewport extends StatelessWidget {
                   ),
                 ),
               ),
-
-            // Etiqueta sobre el avatar (Fase 5: Nombre + ● Disponible)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
@@ -253,8 +273,6 @@ class Room3DViewport extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-
-            // Cuerpo 3D estilizado del Avatar con indicador de dirección
             Container(
               width: 38,
               height: 38,
@@ -330,11 +348,13 @@ class _Room3DScenePainter extends CustomPainter {
     required this.pitch,
     required this.zoom,
     required this.activeHotspot,
+    this.glbReport,
   });
 
   final double pitch;
   final double zoom;
   final HotspotKind? activeHotspot;
+  final GlbOptimizationReport? glbReport;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -352,7 +372,7 @@ class _Room3DScenePainter extends CustomPainter {
       ).createShader(fullRect);
     canvas.drawRect(fullRect, bgPaint);
 
-    // 2. Polígono del piso 3D dentro de los límites de colisión [-0.85 .. 0.85]
+    // 2. Polígono del piso 3D dentro de los límites de colisión [-0.82 .. 0.82]
     const double b = RoomPhysicsController.maxBound;
     final Offset topLeft = Room3DViewport.projectToScreen(
       -b,
@@ -408,7 +428,6 @@ class _Room3DScenePainter extends CustomPainter {
 
     for (int i = -4; i <= 4; i++) {
       final double t = (i / 4.0) * b;
-      // Líneas longitudinales Z
       final Offset p1 = Room3DViewport.projectToScreen(
         t,
         -b,
@@ -425,7 +444,6 @@ class _Room3DScenePainter extends CustomPainter {
       );
       canvas.drawLine(p1, p2, gridPaint);
 
-      // Líneas transversales X
       final Offset q1 = Room3DViewport.projectToScreen(
         -b,
         t,
@@ -443,14 +461,71 @@ class _Room3DScenePainter extends CustomPainter {
       canvas.drawLine(q1, q2, gridPaint);
     }
 
-    // 4. Borde perimetral de Colisión de la Sala 3D
+    // 4. Renderizado de Malla 3D Real decodificada desde `01_sala_principal.glb`
+    final GlbOptimizationReport? report = glbReport;
+    if (report != null &&
+        report.vertices.isNotEmpty &&
+        report.triangles.isNotEmpty) {
+      final Paint meshFillPaint = Paint()
+        ..color = const Color(0xFF1F3A68).withValues(alpha: 0.46)
+        ..style = PaintingStyle.fill;
+      final Paint meshWirePaint = Paint()
+        ..color = Colors.cyanAccent.withValues(alpha: 0.42)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2;
+
+      for (final GlbTriangle tri in report.triangles) {
+        if (tri.i0 < report.vertices.length &&
+            tri.i1 < report.vertices.length &&
+            tri.i2 < report.vertices.length) {
+          final GlbVertex3D v0 = report.vertices[tri.i0];
+          final GlbVertex3D v1 = report.vertices[tri.i1];
+          final GlbVertex3D v2 = report.vertices[tri.i2];
+
+          final Offset s0 = Room3DViewport.project3DToScreen(
+            v0.x,
+            v0.y,
+            v0.z,
+            size,
+            pitch: pitch,
+            zoom: zoom,
+          );
+          final Offset s1 = Room3DViewport.project3DToScreen(
+            v1.x,
+            v1.y,
+            v1.z,
+            size,
+            pitch: pitch,
+            zoom: zoom,
+          );
+          final Offset s2 = Room3DViewport.project3DToScreen(
+            v2.x,
+            v2.y,
+            v2.z,
+            size,
+            pitch: pitch,
+            zoom: zoom,
+          );
+
+          final Path triPath = Path()
+            ..moveTo(s0.dx, s0.dy)
+            ..lineTo(s1.dx, s1.dy)
+            ..lineTo(s2.dx, s2.dy)
+            ..close();
+          canvas.drawPath(triPath, meshFillPaint);
+          canvas.drawPath(triPath, meshWirePaint);
+        }
+      }
+    }
+
+    // 5. Borde perimetral de Colisión de la Sala 3D
     final Paint wallPaint = Paint()
       ..color = Colors.cyanAccent.withValues(alpha: 0.55)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2;
     canvas.drawPath(floorPath, wallPaint);
 
-    // 5. Punto de Spawn Oficial (0.0, 0.42)
+    // 6. Punto de Spawn Oficial (0.0, 0.42)
     final Offset spawnCenter = Room3DViewport.projectToScreen(
       RoomPhysicsController.spawnX,
       RoomPhysicsController.spawnZ,
@@ -467,9 +542,10 @@ class _Room3DScenePainter extends CustomPainter {
       spawnPaint,
     );
 
-    // 6. Mesa Redonda Central de Negocios / Reuniones (Colisión en 0,0)
-    final Offset tableCenter = Room3DViewport.projectToScreen(
+    // 7. Base de Colisión de la Mesa Central de Negocios / Reuniones (0,0)
+    final Offset tableCenter = Room3DViewport.project3DToScreen(
       0.0,
+      0.14,
       0.0,
       size,
       pitch: pitch,
@@ -487,10 +563,6 @@ class _Room3DScenePainter extends CustomPainter {
     );
     canvas.drawOval(
       tableRect,
-      Paint()..color = const Color(0xFF23396C).withValues(alpha: 0.92),
-    );
-    canvas.drawOval(
-      tableRect,
       Paint()
         ..color = Colors.amberAccent.withValues(alpha: 0.75)
         ..style = PaintingStyle.stroke
@@ -502,6 +574,7 @@ class _Room3DScenePainter extends CustomPainter {
   bool shouldRepaint(covariant _Room3DScenePainter oldDelegate) {
     return oldDelegate.pitch != pitch ||
         oldDelegate.zoom != zoom ||
-        oldDelegate.activeHotspot != activeHotspot;
+        oldDelegate.activeHotspot != activeHotspot ||
+        oldDelegate.glbReport != glbReport;
   }
 }

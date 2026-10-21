@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:wordverse/core/api_client/shest_api_client.dart';
 import 'package:wordverse/core/events/wordverse_events.dart';
 import 'package:wordverse/core/models/shest_models.dart';
+import 'package:wordverse/features/wordverse/3d_room/glb_inspector.dart';
 import 'package:wordverse/features/wordverse/movement/room_physics_controller.dart';
 import 'package:wordverse/main.dart';
 
@@ -150,6 +151,15 @@ void main() {
 
         await tester.pumpWidget(WordverseApp(apiClient: apiClient));
         await tester.pump();
+
+        // Verificar que el archivo binario 01_sala_principal.glb se decodifica con 17 vértices 3D y 14 polígonos
+        final GlbOptimizationReport glbReport =
+            await GlbOptimizationReport.inspectAsset(
+              'assets/models/01_sala_principal.glb',
+            );
+        expect(glbReport.isValidGlb, isTrue);
+        expect(glbReport.vertexCount, equals(17));
+        expect(glbReport.triangleCount, equals(14));
 
         // 1. Verificar puerta de entrada de sesión Shest y pulsar para entrar a la Sala 3D
         expect(find.text('SHEST LABS → WORDVERSE 3D'), findsOneWidget);
