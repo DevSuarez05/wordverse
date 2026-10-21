@@ -43,6 +43,9 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
   double _cameraYaw = 0.0;
   String _selectedSubRoom = 'Sala Principal';
   String _selectedGateUserId = 'usr_1';
+  bool _isProbingConnection = false;
+  bool? _connectionProbeOk;
+  String? _connectionProbeMessage;
   late final TextEditingController _remoteUrlCtrl;
   late final TextEditingController _remoteKeyCtrl;
 
@@ -87,6 +90,31 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
         );
     if (!mounted) return;
     setState(() => _glbReport = report);
+  }
+
+  Future<void> _probeRemoteConnection() async {
+    setState(() {
+      _isProbingConnection = true;
+      _connectionProbeMessage = null;
+    });
+    if (widget.apiClient.environment != ShestBackendEnvironment.mock) {
+      widget.apiClient.configureRemoteCredentials(
+        baseUrl: _remoteUrlCtrl.text,
+        apiKeyOrToken: _remoteKeyCtrl.text,
+      );
+      _multiplayer.configureRealtimeEndpoint(
+        restUrl: _remoteUrlCtrl.text,
+        anonKey: _remoteKeyCtrl.text,
+      );
+    }
+    final ({bool ok, String message}) result = await widget.apiClient
+        .verifyRemoteConnection();
+    if (!mounted) return;
+    setState(() {
+      _isProbingConnection = false;
+      _connectionProbeOk = result.ok;
+      _connectionProbeMessage = result.message;
+    });
   }
 
   Future<void> _enterWordverseFromShestSession({String userId = 'usr_1'}) async {
@@ -517,6 +545,81 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                           isDense: true,
                         ),
                       ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              key: const Key('btn_verify_remote_connection'),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.amberAccent,
+                                side: const BorderSide(
+                                  color: Colors.amberAccent,
+                                ),
+                              ),
+                              onPressed: _isProbingConnection
+                                  ? null
+                                  : _probeRemoteConnection,
+                              icon: _isProbingConnection
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.amberAccent,
+                                      ),
+                                    )
+                                  : const Icon(Icons.network_check, size: 16),
+                              label: Text(
+                                _isProbingConnection
+                                    ? 'Verificando...'
+                                    : 'Probar Conexión Remota',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_connectionProbeMessage != null) ...<Widget>[
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: (_connectionProbeOk ?? false)
+                                ? Colors.green.withValues(alpha: 0.16)
+                                : Colors.orange.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: (_connectionProbeOk ?? false)
+                                  ? Colors.greenAccent
+                                  : Colors.orangeAccent,
+                            ),
+                          ),
+                          child: Row(
+                            children: <Widget>[
+                              Icon(
+                                (_connectionProbeOk ?? false)
+                                    ? Icons.check_circle
+                                    : Icons.info_outline,
+                                size: 16,
+                                color: (_connectionProbeOk ?? false)
+                                    ? Colors.greenAccent
+                                    : Colors.orangeAccent,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _connectionProbeMessage!,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 18),
                     SizedBox(

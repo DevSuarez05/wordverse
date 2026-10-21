@@ -133,6 +133,22 @@ class ShestApiClient {
   bool get simulateOffline => activeAdapter.simulateOffline;
   set simulateOffline(bool value) => activeAdapter.simulateOffline = value;
 
+  /// Verifica en vivo la conectividad con Supabase PostgREST o el Backend Java de Shest.
+  Future<({bool ok, String message})> verifyRemoteConnection() async {
+    switch (environment) {
+      case ShestBackendEnvironment.mock:
+        return (
+          ok: true,
+          message:
+              'Simulador Mock Shest Labs activo en memoria (4 usuarios, reunión WV-45821 y Escrow #45821 listos).',
+        );
+      case ShestBackendEnvironment.supabaseStaging:
+        return _supabaseAdapter.verifyRemoteConnection();
+      case ShestBackendEnvironment.production:
+        return _productionAdapter.verifyRemoteConnection();
+    }
+  }
+
   /// Mensajes de chat almacenados en la sesión o reunión (Fase 14).
   List<WordverseChatMessage> getChatMessages(String channelId) =>
       activeAdapter.getChatMessages(channelId);

@@ -78,6 +78,28 @@ create table if not exists public.room_presence (
   updated_at timestamptz default now()
 );
 
+-- 6. Tabla de Operaciones P2P (p2p_operations - Fase 21)
+create table if not exists public.p2p_operations (
+  id text primary key,
+  maker_id text not null references public.users(id),
+  maker_nombre text not null default 'Valeria Méndez',
+  monto_usdt numeric(18, 2) not null check (monto_usdt > 0),
+  tasa_usd numeric(10, 4) not null default 1.0000,
+  metodo_pago text not null default 'Transferencia Bancaria / USDT TRC20',
+  estado text not null default 'OPEN' check (estado in ('OPEN', 'IN_ESCROW', 'COMPLETED', 'CANCELLED')),
+  created_at timestamptz default now()
+);
+
+-- 7. Tabla de Mensajes de Chat por Sala/Canal (chat_messages - Fase 14)
+create table if not exists public.chat_messages (
+  id text primary key,
+  channel_id text not null default 'Sala Principal',
+  sender_id text not null references public.users(id),
+  sender_name text not null,
+  texto text not null,
+  created_at timestamptz default now()
+);
+
 -- =============================================================================
 -- POLÍTICAS RLS PARA PRUEBAS DE DESARROLLO (Dev 1 + Dev 2 con ANON_KEY)
 -- =============================================================================
@@ -86,6 +108,8 @@ alter table public.wallets enable row level security;
 alter table public.meetings enable row level security;
 alter table public.escrows enable row level security;
 alter table public.room_presence enable row level security;
+alter table public.p2p_operations enable row level security;
+alter table public.chat_messages enable row level security;
 
 drop policy if exists "Allow anon all users" on public.users;
 create policy "Allow anon all users" on public.users for all using (true) with check (true);
@@ -101,6 +125,12 @@ create policy "Allow anon all escrows" on public.escrows for all using (true) wi
 
 drop policy if exists "Allow anon all room_presence" on public.room_presence;
 create policy "Allow anon all room_presence" on public.room_presence for all using (true) with check (true);
+
+drop policy if exists "Allow anon all p2p_operations" on public.p2p_operations;
+create policy "Allow anon all p2p_operations" on public.p2p_operations for all using (true) with check (true);
+
+drop policy if exists "Allow anon all chat_messages" on public.chat_messages;
+create policy "Allow anon all chat_messages" on public.chat_messages for all using (true) with check (true);
 
 -- =============================================================================
 -- DATOS SEMILLA INICIALES (Idénticos a MockShestApi)
@@ -132,3 +162,9 @@ values
   ('usr_3', 'Sala Principal',  0.34, -0.12, 0.0, null, true),
   ('usr_4', 'Sala Principal',  0.28,  0.30, 0.0, null, true)
 on conflict (user_id) do nothing;
+
+insert into public.p2p_operations (id, maker_id, maker_nombre, monto_usdt, tasa_usd, metodo_pago, estado)
+values
+  ('p2p_901', 'usr_2', 'Valeria Méndez', 2500.00, 1.0020, 'Transferencia Bancaria Instantánea', 'OPEN'),
+  ('p2p_902', 'usr_3', 'Carlos Mendoza', 5000.00, 0.9990, 'Wire USD / Sepa Instant', 'OPEN')
+on conflict (id) do nothing;

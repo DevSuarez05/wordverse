@@ -317,8 +317,89 @@ class HttpShestApi implements ShestBackendAdapter {
   Future<List<PaymentRecord>> getPaymentHistory(String userId) =>
       fallbackMock.getPaymentHistory(userId);
 
+  P2POperation _parseP2PRow(Map<String, Object?> row) {
+    final String stateStr = (row['estado'] as String?) ?? 'OPEN';
+    return P2POperation(
+      id: (row['id'] as String?) ?? 'p2p_901',
+      makerId: (row['maker_id'] as String?) ?? 'usr_2',
+      makerName: (row['maker_nombre'] as String?) ?? 'Valeria Méndez',
+      amountUsdt: (row['monto_usdt'] as num?)?.toDouble() ?? 1000.0,
+      rateUsd: (row['tasa_usd'] as num?)?.toDouble() ?? 1.0,
+      paymentMethod:
+          (row['metodo_pago'] as String?) ?? 'Transferencia Bancaria',
+      status: stateStr,
+    );
+  }
+
+  /// Verifica en vivo la conexión contra Supabase PostgREST o el Backend Java de Shest.
+  Future<({bool ok, String message})> verifyRemoteConnection() async {
+    if (!hasLiveCredentials) {
+      return (
+        ok: false,
+        message:
+            'Falta ingresar la URL de tu proyecto Supabase y el SUPABASE_ANON_KEY (actualmente usando fallback Mock local).',
+      );
+    }
+    try {
+      final Uri uri = Uri.parse('$_normalizedRestUrl/users?select=id,nombre');
+      final http.Response res = await _http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 6));
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
+        return (
+          ok: true,
+          message:
+              'Conectado en vivo a $_normalizedRestUrl (${rows.length} usuarios sincronizados en base de datos).',
+        );
+      } else if (res.statusCode == 404 || res.body.contains('42P01')) {
+        return (
+          ok: false,
+          message:
+              'Conectado al servidor (HTTP ${res.statusCode}), pero faltan las tablas. Copia y ejecuta supabase_schema.sql en el SQL Editor de Supabase.',
+        );
+      } else if (res.statusCode == 401 || res.statusCode == 403) {
+        return (
+          ok: false,
+          message:
+              'Credenciales rechazadas (HTTP ${res.statusCode}). Verifica tu SUPABASE_ANON_KEY o Bearer Token.',
+        );
+      } else {
+        return (
+          ok: false,
+          message: 'Respuesta HTTP ${res.statusCode}: ${res.body}',
+        );
+      }
+    } catch (e) {
+      return (
+        ok: false,
+        message: 'No se pudo conectar a $_normalizedRestUrl: $e',
+      );
+    }
+  }
+
   @override
-  Future<List<P2POperation>> listOperations() => fallbackMock.listOperations();
+  Future<List<P2POperation>> listOperations() async {
+    _checkOnline();
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse(
+          '$_normalizedRestUrl/p2p_operations?select=*&order=created_at.desc',
+        );
+        final http.Response res = await _http
+            .get(uri, headers: _headers)
+            .timeout(const Duration(seconds: 5));
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
+          return rows
+              .whereType<Map<String, Object?>>()
+              .map(_parseP2PRow)
+              .toList();
+        }
+      } catch (_) {}
+    }
+    return fallbackMock.listOperations();
+  }
 
   @override
   Future<P2POperation> createOperation({
@@ -326,25 +407,86 @@ class HttpShestApi implements ShestBackendAdapter {
     required double amountUsdt,
     required double rateUsd,
     required String paymentMethod,
-  }) => fallbackMock.createOperation(
-    makerId: makerId,
-    amountUsdt: amountUsdt,
-    rateUsd: rateUsd,
-    paymentMethod: paymentMethod,
-  );
+  }) async {
+    _checkOnline();
+    final P2POperation createdLocal = await fallbackMock.createOperation(
+      makerId: makerId,
+      amountUsdt: amountUsdt,
+      rateUsd: rateUsd,
+      paymentMethod: paymentMethod,
+    );
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse('$_normalizedRestUrl/p2p_operations');
+        await _http
+            .post(
+              uri,
+              headers: _headers,
+              body: jsonEncode(<String, Object?>{
+                'id': createdLocal.id,
+                'maker_id': createdLocal.makerId,
+                'maker_nombre': createdLocal.makerName,
+                'monto_usdt': createdLocal.amountUsdt,
+                'tasa_usd': createdLocal.rateUsd,
+                'metodo_pago': createdLocal.paymentMethod,
+                'estado': 'OPEN',
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+    return createdLocal;
+  }
 
   @override
   Future<P2POperation> acceptOperation({
     required String operationId,
     required String takerId,
-  }) => fallbackMock.acceptOperation(
-    operationId: operationId,
-    takerId: takerId,
-  );
+  }) async {
+    _checkOnline();
+    final P2POperation acceptedLocal = await fallbackMock.acceptOperation(
+      operationId: operationId,
+      takerId: takerId,
+    );
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse(
+          '$_normalizedRestUrl/p2p_operations?id=eq.$operationId',
+        );
+        await _http
+            .patch(
+              uri,
+              headers: _headers,
+              body: jsonEncode(<String, Object?>{'estado': 'IN_ESCROW'}),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+    return acceptedLocal;
+  }
 
   @override
-  Future<P2POperation> cancelOperation(String operationId) =>
-      fallbackMock.cancelOperation(operationId);
+  Future<P2POperation> cancelOperation(String operationId) async {
+    _checkOnline();
+    final P2POperation cancelledLocal = await fallbackMock.cancelOperation(
+      operationId,
+    );
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse(
+          '$_normalizedRestUrl/p2p_operations?id=eq.$operationId',
+        );
+        await _http
+            .patch(
+              uri,
+              headers: _headers,
+              body: jsonEncode(<String, Object?>{'estado': 'CANCELLED'}),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+    return cancelledLocal;
+  }
 
   @override
   Future<List<EscrowOperation>> listEscrows(String userId) async {
@@ -528,10 +670,32 @@ class HttpShestApi implements ShestBackendAdapter {
     required String senderName,
     required String channelId,
     required String text,
-  }) => fallbackMock.sendChatMessage(
-    senderId: senderId,
-    senderName: senderName,
-    channelId: channelId,
-    text: text,
-  );
+  }) async {
+    _checkOnline();
+    final WordverseChatMessage msg = await fallbackMock.sendChatMessage(
+      senderId: senderId,
+      senderName: senderName,
+      channelId: channelId,
+      text: text,
+    );
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse('$_normalizedRestUrl/chat_messages');
+        await _http
+            .post(
+              uri,
+              headers: _headers,
+              body: jsonEncode(<String, Object?>{
+                'id': msg.id,
+                'channel_id': msg.channelId,
+                'sender_id': msg.senderId,
+                'sender_name': msg.senderName,
+                'texto': msg.text,
+              }),
+            )
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
+    return msg;
+  }
 }
