@@ -37,13 +37,28 @@ class ShestApiClient {
     required this.eventBus,
     this.environment = ShestBackendEnvironment.mock,
   }) : _mockAdapter = MockShestApi(eventBus: eventBus) {
+    const String envSupabaseUrl = String.fromEnvironment(
+      'SUPABASE_URL',
+      defaultValue: 'https://your-project.supabase.co/rest/v1',
+    );
+    const String envSupabaseAnonKey = String.fromEnvironment(
+      'SUPABASE_ANON_KEY',
+    );
+    const String envShestApiUrl = String.fromEnvironment(
+      'SHEST_API_URL',
+      defaultValue: 'https://api.shestlabs.com/v1',
+    );
+    const String envShestToken = String.fromEnvironment('SHEST_API_TOKEN');
+
     _supabaseAdapter = HttpShestApi(
-      baseUrl: ShestBackendEnvironment.supabaseStaging.baseUrl,
+      baseUrl: envSupabaseUrl,
+      apiKeyOrToken: envSupabaseAnonKey,
       eventBus: eventBus,
       fallbackMock: _mockAdapter,
     );
     _productionAdapter = HttpShestApi(
-      baseUrl: ShestBackendEnvironment.production.baseUrl,
+      baseUrl: envShestApiUrl,
+      apiKeyOrToken: envShestToken,
       eventBus: eventBus,
       fallbackMock: _mockAdapter,
     );
@@ -55,6 +70,47 @@ class ShestApiClient {
   final MockShestApi _mockAdapter;
   late final HttpShestApi _supabaseAdapter;
   late final HttpShestApi _productionAdapter;
+
+  /// Permite configurar en caliente la URL y el `ANON_KEY` / Token JWT de
+  /// Supabase o del Backend Java de Shest desde la interfaz de acceso.
+  void configureRemoteCredentials({
+    required String baseUrl,
+    required String apiKeyOrToken,
+  }) {
+    if (environment == ShestBackendEnvironment.supabaseStaging) {
+      if (baseUrl.trim().isNotEmpty) {
+        _supabaseAdapter.baseUrl = baseUrl.trim();
+      }
+      _supabaseAdapter.apiKeyOrToken = apiKeyOrToken.trim();
+    } else if (environment == ShestBackendEnvironment.production) {
+      if (baseUrl.trim().isNotEmpty) {
+        _productionAdapter.baseUrl = baseUrl.trim();
+      }
+      _productionAdapter.apiKeyOrToken = apiKeyOrToken.trim();
+    }
+  }
+
+  String get currentRemoteUrl {
+    switch (environment) {
+      case ShestBackendEnvironment.mock:
+        return ShestBackendEnvironment.mock.baseUrl;
+      case ShestBackendEnvironment.supabaseStaging:
+        return _supabaseAdapter.baseUrl;
+      case ShestBackendEnvironment.production:
+        return _productionAdapter.baseUrl;
+    }
+  }
+
+  String get currentRemoteKey {
+    switch (environment) {
+      case ShestBackendEnvironment.mock:
+        return '';
+      case ShestBackendEnvironment.supabaseStaging:
+        return _supabaseAdapter.apiKeyOrToken;
+      case ShestBackendEnvironment.production:
+        return _productionAdapter.apiKeyOrToken;
+    }
+  }
 
   ShestBackendAdapter get activeAdapter {
     switch (environment) {

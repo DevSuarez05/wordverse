@@ -38,6 +38,8 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
   final double _cameraPitch = 0.62;
   double _cameraZoom = 1.0;
   String _selectedSubRoom = 'Sala Principal';
+  late final TextEditingController _remoteUrlCtrl;
+  late final TextEditingController _remoteKeyCtrl;
 
   static const List<String> _subRooms = <String>[
     'Sala Principal',
@@ -50,6 +52,12 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
   @override
   void initState() {
     super.initState();
+    _remoteUrlCtrl = TextEditingController(
+      text: widget.apiClient.currentRemoteUrl,
+    );
+    _remoteKeyCtrl = TextEditingController(
+      text: widget.apiClient.currentRemoteKey,
+    );
     _multiplayer = WordverseMultiplayerService(
       eventBus: widget.apiClient.eventBus,
     );
@@ -69,6 +77,12 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
   }
 
   Future<void> _enterWordverseFromShestSession({String userId = 'usr_1'}) async {
+    if (widget.apiClient.environment != ShestBackendEnvironment.mock) {
+      widget.apiClient.configureRemoteCredentials(
+        baseUrl: _remoteUrlCtrl.text,
+        apiKeyOrToken: _remoteKeyCtrl.text,
+      );
+    }
     final ShestAuthSession session = await widget.apiClient.auth
         .loginWithShestSession(userId: userId);
     final List<ShestUser> allUsers =
@@ -219,6 +233,8 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
 
   @override
   void dispose() {
+    _remoteUrlCtrl.dispose();
+    _remoteKeyCtrl.dispose();
     _multiplayer.dispose();
     super.dispose();
   }
@@ -347,10 +363,53 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                           .toList(),
                       onChanged: (ShestBackendEnvironment? val) {
                         if (val != null) {
-                          setState(() => widget.apiClient.environment = val);
+                          setState(() {
+                            widget.apiClient.environment = val;
+                            _remoteUrlCtrl.text =
+                                widget.apiClient.currentRemoteUrl;
+                            _remoteKeyCtrl.text =
+                                widget.apiClient.currentRemoteKey;
+                          });
                         }
                       },
                     ),
+                    if (widget.apiClient.environment !=
+                        ShestBackendEnvironment.mock) ...<Widget>[
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('input_remote_url'),
+                        controller: _remoteUrlCtrl,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12.5,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: widget.apiClient.environment ==
+                                  ShestBackendEnvironment.supabaseStaging
+                              ? 'URL del Proyecto Supabase (ej: https://xyz.supabase.co)'
+                              : 'URL Base API Shest Java (ej: https://api.shestlabs.com/v1)',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        key: const Key('input_remote_key'),
+                        controller: _remoteKeyCtrl,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12.5,
+                        ),
+                        decoration: InputDecoration(
+                          labelText: widget.apiClient.environment ==
+                                  ShestBackendEnvironment.supabaseStaging
+                              ? 'SUPABASE_ANON_KEY (Opcional: si se omite usa fallback Mock)'
+                              : 'Bearer Token JWT de Shest',
+                          labelStyle: const TextStyle(color: Colors.white70),
+                          isDense: true,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
