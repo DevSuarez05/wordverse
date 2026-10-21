@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
 
 import '../../../core/api_client/shest_api_client.dart';
@@ -115,6 +116,25 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
       _connectionProbeOk = result.ok;
       _connectionProbeMessage = result.message;
     });
+  }
+
+  Future<void> _copySupabaseSqlSchema() async {
+    try {
+      final String sql = await rootBundle.loadString('supabase_schema.sql');
+      await Clipboard.setData(ClipboardData(text: sql));
+      if (!mounted) return;
+      setState(() {
+        _connectionProbeOk = true;
+        _connectionProbeMessage =
+            'Script supabase_schema.sql (7 tablas + RLS + Seed) copiado al portapapeles. Pégalo con Ctrl+V en Supabase -> SQL Editor -> Run.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _connectionProbeOk = false;
+        _connectionProbeMessage = 'No se pudo copiar el script SQL: $e';
+      });
+    }
   }
 
   Future<void> _enterWordverseFromShestSession({String userId = 'usr_1'}) async {
@@ -573,11 +593,33 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                               label: Text(
                                 _isProbingConnection
                                     ? 'Verificando...'
-                                    : 'Probar Conexión Remota',
+                                    : 'Probar Conexión',
                                 style: const TextStyle(fontSize: 12),
                               ),
                             ),
                           ),
+                          if (widget.apiClient.environment ==
+                              ShestBackendEnvironment
+                                  .supabaseStaging) ...<Widget>[
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                key: const Key('btn_copy_supabase_sql'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.cyanAccent,
+                                  side: const BorderSide(
+                                    color: Colors.cyanAccent,
+                                  ),
+                                ),
+                                onPressed: _copySupabaseSqlSchema,
+                                icon: const Icon(Icons.copy_all, size: 16),
+                                label: const Text(
+                                  'Copiar SQL (7 Tablas)',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                       if (_connectionProbeMessage != null) ...<Widget>[
