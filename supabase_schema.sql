@@ -66,6 +66,18 @@ create table if not exists public.escrows (
   created_at timestamptz default now()
 );
 
+-- 5. Tabla de Presencia Multiplayer en Sala 3D (room_presence - Fase 7)
+create table if not exists public.room_presence (
+  user_id text primary key references public.users(id) on delete cascade,
+  sala text not null default 'Sala Principal',
+  pos_x double precision not null default 0.0,
+  pos_z double precision not null default 0.42,
+  rotacion double precision not null default 0.0,
+  emote text,
+  online boolean default true,
+  updated_at timestamptz default now()
+);
+
 -- =============================================================================
 -- POLÍTICAS RLS PARA PRUEBAS DE DESARROLLO (Dev 1 + Dev 2 con ANON_KEY)
 -- =============================================================================
@@ -73,6 +85,7 @@ alter table public.users enable row level security;
 alter table public.wallets enable row level security;
 alter table public.meetings enable row level security;
 alter table public.escrows enable row level security;
+alter table public.room_presence enable row level security;
 
 drop policy if exists "Allow anon all users" on public.users;
 create policy "Allow anon all users" on public.users for all using (true) with check (true);
@@ -85,6 +98,9 @@ create policy "Allow anon all meetings" on public.meetings for all using (true) 
 
 drop policy if exists "Allow anon all escrows" on public.escrows;
 create policy "Allow anon all escrows" on public.escrows for all using (true) with check (true);
+
+drop policy if exists "Allow anon all room_presence" on public.room_presence;
+create policy "Allow anon all room_presence" on public.room_presence for all using (true) with check (true);
 
 -- =============================================================================
 -- DATOS SEMILLA INICIALES (Idénticos a MockShestApi)
@@ -109,3 +125,10 @@ insert into public.meetings (id, codigo, nombre, tipo, descripcion, es_privada, 
 values
   ('mtg_1', 'WV-45821', 'Mesa de Negocios OTC Latam', 'Negocios', 'Reunión principal para acuerdos comerciales con Escrow.', false, 60, 'usr_2', 'Valeria Méndez')
 on conflict (id) do nothing;
+
+insert into public.room_presence (user_id, sala, pos_x, pos_z, rotacion, emote, online)
+values
+  ('usr_2', 'Sala Principal', -0.32, -0.18, 0.0, 'negotiate', true),
+  ('usr_3', 'Sala Principal',  0.34, -0.12, 0.0, null, true),
+  ('usr_4', 'Sala Principal',  0.28,  0.30, 0.0, null, true)
+on conflict (user_id) do nothing;

@@ -82,6 +82,10 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
         baseUrl: _remoteUrlCtrl.text,
         apiKeyOrToken: _remoteKeyCtrl.text,
       );
+      _multiplayer.configureRealtimeEndpoint(
+        restUrl: _remoteUrlCtrl.text,
+        anonKey: _remoteKeyCtrl.text,
+      );
     }
     final ShestAuthSession session = await widget.apiClient.auth
         .loginWithShestSession(userId: userId);
