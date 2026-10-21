@@ -152,14 +152,14 @@ void main() {
         await tester.pumpWidget(WordverseApp(apiClient: apiClient));
         await tester.pump();
 
-        // Verificar que el archivo binario 01_sala_principal.glb se decodifica con 17 vértices 3D y 14 polígonos
+        // Verificar que el archivo binario 01_sala_principal.glb se decodifica con 165 vértices 3D y 86 polígonos
         final GlbOptimizationReport glbReport =
             await GlbOptimizationReport.inspectAsset(
               'assets/models/01_sala_principal.glb',
             );
         expect(glbReport.isValidGlb, isTrue);
-        expect(glbReport.vertexCount, equals(17));
-        expect(glbReport.triangleCount, equals(14));
+        expect(glbReport.vertexCount, equals(165));
+        expect(glbReport.triangleCount, equals(86));
 
         // 1. Verificar puerta de entrada de sesión Shest y pulsar para entrar a la Sala 3D
         expect(find.text('SHEST LABS → WORDVERSE 3D'), findsOneWidget);

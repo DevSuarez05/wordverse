@@ -68,6 +68,26 @@ class RoomPhysicsController {
       collided = true;
     }
 
+    // 3. Colisión con las 4 columnas arquitectónicas en las esquinas (±0.76, ±0.76)
+    const List<(double, double)> pillars = <(double, double)>[
+      (-0.76, -0.76),
+      (0.76, -0.76),
+      (0.76, 0.76),
+      (-0.76, 0.76),
+    ];
+    const double pillarRadius = 0.08;
+    for (final (double px, double pz) in pillars) {
+      final double dx = nextX - px;
+      final double dz = nextZ - pz;
+      final double dist = math.sqrt(dx * dx + dz * dz);
+      if (dist < pillarRadius) {
+        final double safeDist = dist == 0 ? 0.001 : dist;
+        nextX = px + (dx / safeDist) * pillarRadius;
+        nextZ = pz + (dz / safeDist) * pillarRadius;
+        collided = true;
+      }
+    }
+
     final double rotation = math.atan2(joyDy, joyDx);
     return (x: nextX, z: nextZ, rotation: rotation, collided: collided);
   }
