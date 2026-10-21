@@ -11,6 +11,7 @@ import '../avatar/avatar_node.dart';
 import '../meetings/escrow_p2p_modals.dart';
 import '../meetings/meetings_qr_modals.dart';
 import '../meetings/notifications_sheet.dart';
+import '../meetings/shest_cafe_sheet.dart';
 import '../movement/room_physics_controller.dart';
 import '../multiplayer/multiplayer_service.dart';
 import 'glb_inspector.dart';
@@ -38,6 +39,8 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
   AvatarRoomNode? _localAvatar;
   HotspotKind? _nearbyHotspot;
   GlbOptimizationReport? _glbReport;
+  WalletInfo? _walletInfo;
+  ({double normX, double normZ})? _floorTarget;
 
   final double _cameraPitch = 0.62;
   double _cameraZoom = 1.0;
@@ -152,6 +155,9 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
         .loginWithShestSession(userId: userId);
     final List<ShestUser> allUsers =
         await widget.apiClient.auth.searchUsers();
+    final WalletInfo wallet = await widget.apiClient.wallet.getWalletInfo(
+      session.user.id,
+    );
 
     final AvatarRoomNode initialLocal = AvatarRoomNode(
       user: session.user,
@@ -172,8 +178,32 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
     if (!mounted) return;
     setState(() {
       _localAvatar = initialLocal;
+      _walletInfo = wallet;
       _inRoom = true;
     });
+  }
+
+  Future<void> _refreshWalletBalance() async {
+    final ShestUser? user = _localAvatar?.user;
+    if (user == null) return;
+    try {
+      final WalletInfo wallet = await widget.apiClient.wallet.getWalletInfo(
+        user.id,
+      );
+      if (!mounted) return;
+      setState(() => _walletInfo = wallet);
+    } catch (_) {}
+  }
+
+  void _openShestCafeSheet() {
+    final ShestUser? user = _localAvatar?.user;
+    if (user == null) return;
+    WordverseShestCafeSheet.show(
+      context: context,
+      apiClient: widget.apiClient,
+      currentUser: user,
+      onTransactionComplete: _refreshWalletBalance,
+    );
   }
 
   void _onJoystickMove(StickDragDetails details) {
@@ -251,6 +281,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
         rotationRadians: rotation,
         isMoving: false,
       );
+      _floorTarget = (normX: finalX, normZ: finalZ);
       _nearbyHotspot = detectedHotspot;
     });
 
@@ -278,6 +309,8 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
     });
     if (emote == WordverseEmote.p2p) {
       _handleHotspotAction(HotspotKind.p2p);
+    } else if (emote == WordverseEmote.coffee) {
+      _openShestCafeSheet();
     }
   }
 
@@ -709,7 +742,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
       body: SafeArea(
         child: Stack(
           children: <Widget>[
-            // 1. Escena 3D Interactiva (Sala + 7 Hotspots + Avatares + Tap-to-walk)
+            // 1. Escena 3D Interactiva (Sala + 7 Hotspots + Avatares + Tap-to-walk + Orbit 3D)
             Positioned.fill(
               child: Room3DViewport(
                 localAvatar: local,
@@ -719,8 +752,13 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                 cameraZoom: _cameraZoom,
                 cameraYaw: _cameraYaw,
                 subRoomName: _selectedSubRoom,
+                floorTarget: _floorTarget,
                 glbReport: _glbReport,
                 onFloorTapped: _onFloorTapped,
+                onOrbitDelta: (double delta) {
+                  setState(() => _cameraYaw += delta);
+                },
+                onShestCafeTapped: _openShestCafeSheet,
                 onHotspotTapped: _handleHotspotAction,
                 onAvatarTapped: (AvatarRoomNode tappedNode) {
                   if (tappedNode.isLocalPlayer) {
@@ -738,7 +776,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
               ),
             ),
 
-            // 2. HUD Superior: Sesión Shest, Selector de Salas (Fase 8), Estado (Fase 16), Eventos (Fase 31/32) y Reconexión (Fase 35)
+            // 2. HUD Superior: Sesión Shest, Selector de Salas (Fase 8), Estado (Fase 16), Wallet USDT, Shest Coffee, Eventos y Reconexión
             Positioned(
               top: 8,
               left: 10,
@@ -830,6 +868,62 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 11.5,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Píldora Wallet USDT TRC20 en vivo (Fase 19 / 26)
+                        InkWell(
+                          key: const Key('btn_hud_wallet'),
+                          onTap: () => _handleHotspotAction(HotspotKind.p2p),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.greenAccent.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            child: Text(
+                              _walletInfo == null
+                                  ? '💰 Wallet USDT'
+                                  : '💰 ${_walletInfo!.usdtBalance.toStringAsFixed(0)} USDT',
+                              style: const TextStyle(
+                                color: Colors.greenAccent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // Píldora Vitrina Oficial Shest Coffee & Glosario
+                        InkWell(
+                          key: const Key('btn_hud_shest_cafe'),
+                          onTap: _openShestCafeSheet,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF281E0D),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFD4AF37)),
+                            ),
+                            child: const Text(
+                              '☕ Shest Coffee',
+                              style: TextStyle(
+                                color: Color(0xFFD4AF37),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),

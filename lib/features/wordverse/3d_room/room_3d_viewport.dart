@@ -28,6 +28,9 @@ class Room3DViewport extends StatelessWidget {
     this.cameraYaw = 0.0,
     this.subRoomName = 'Sala Principal',
     this.onFloorTapped,
+    this.onOrbitDelta,
+    this.onShestCafeTapped,
+    this.floorTarget,
     this.glbReport,
   });
 
@@ -41,6 +44,9 @@ class Room3DViewport extends StatelessWidget {
   final ValueChanged<AvatarRoomNode> onAvatarTapped;
   final ValueChanged<HotspotKind> onHotspotTapped;
   final void Function(double normX, double normZ)? onFloorTapped;
+  final ValueChanged<double>? onOrbitDelta;
+  final VoidCallback? onShestCafeTapped;
+  final ({double normX, double normZ})? floorTarget;
   final GlbOptimizationReport? glbReport;
 
   /// Proyecta una coordenada 3D normalizada (x, z) en el plano del piso al lienzo 2D.
@@ -144,6 +150,10 @@ class Room3DViewport extends StatelessWidget {
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (DragUpdateDetails details) {
+                  if (onOrbitDelta == null) return;
+                  onOrbitDelta!(details.delta.dx * 0.006);
+                },
                 onTapUp: (TapUpDetails details) {
                   if (onFloorTapped == null) return;
                   final ({double normX, double normZ}) target =
@@ -163,11 +173,15 @@ class Room3DViewport extends StatelessWidget {
                     yaw: cameraYaw,
                     subRoomName: subRoomName,
                     activeHotspot: activeHotspot,
+                    floorTarget: floorTarget,
                     glbReport: glbReport,
                   ),
                 ),
               ),
             ),
+
+            // 1.5. Marcador 3D Interactivo sobre la Barra de Shest Coffee (-0.42, 0.22, -0.58)
+            if (onShestCafeTapped != null) _buildShestCafeBarMarker(canvasSize),
 
             // 2. Los 7 Hotspots Interactivos de la Sala 3D (Fase 27)
             for (final HotspotKind spot in HotspotKind.values)
@@ -408,6 +422,68 @@ class Room3DViewport extends StatelessWidget {
         return Colors.redAccent;
     }
   }
+
+  Widget _buildShestCafeBarMarker(Size canvasSize) {
+    final Offset pos = project3DToScreen(
+      -0.42,
+      0.24,
+      -0.58,
+      canvasSize,
+      pitch: cameraPitch,
+      zoom: cameraZoom,
+      yaw: cameraYaw,
+    );
+    const Color gold = Color(0xFFD4AF37);
+
+    return Positioned(
+      left: pos.dx - 58,
+      top: pos.dy - 20,
+      width: 116,
+      child: GestureDetector(
+        key: const Key('marker_shest_cafe_bar'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onShestCafeTapped,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xEE120E07),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: gold, width: 1.5),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: gold.withValues(alpha: 0.45),
+                blurRadius: 10,
+              ),
+            ],
+          ),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                '☕ SHEST COFFEE',
+                style: TextStyle(
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w900,
+                  color: gold,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              Text(
+                'Catálogo & USDT',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _Room3DScenePainter extends CustomPainter {
@@ -417,6 +493,7 @@ class _Room3DScenePainter extends CustomPainter {
     required this.yaw,
     required this.subRoomName,
     required this.activeHotspot,
+    this.floorTarget,
     this.glbReport,
   });
 
@@ -425,6 +502,7 @@ class _Room3DScenePainter extends CustomPainter {
   final double yaw;
   final String subRoomName;
   final HotspotKind? activeHotspot;
+  final ({double normX, double normZ})? floorTarget;
   final GlbOptimizationReport? glbReport;
 
   Color _accentForSubRoom() {
@@ -695,6 +773,30 @@ class _Room3DScenePainter extends CustomPainter {
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.0,
     );
+
+    // 8. Indicador luminoso de destino Tap-to-Walk en el piso 3D
+    if (floorTarget != null) {
+      final Offset targetPos = Room3DViewport.projectToScreen(
+        floorTarget!.normX,
+        floorTarget!.normZ,
+        size,
+        pitch: pitch,
+        zoom: zoom,
+        yaw: yaw,
+      );
+      canvas.drawOval(
+        Rect.fromCenter(center: targetPos, width: 32, height: 18),
+        Paint()
+          ..color = Colors.cyanAccent.withValues(alpha: 0.75)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+      canvas.drawCircle(
+        targetPos,
+        3.5,
+        Paint()..color = Colors.cyanAccent,
+      );
+    }
   }
 
   @override
@@ -704,6 +806,7 @@ class _Room3DScenePainter extends CustomPainter {
         oldDelegate.yaw != yaw ||
         oldDelegate.subRoomName != subRoomName ||
         oldDelegate.activeHotspot != activeHotspot ||
+        oldDelegate.floorTarget != floorTarget ||
         oldDelegate.glbReport != glbReport;
   }
 }
