@@ -1,26 +1,17 @@
-import '../api_client/auth_service.dart';
-import '../api_client/escrow_service.dart';
-import '../api_client/p2p_service.dart';
-import '../api_client/qr_service.dart';
-import '../api_client/wallet_service.dart';
+import '../api_client/shest_backend_adapter.dart';
 import '../events/wordverse_events.dart';
 import '../models/shest_models.dart';
 
 /// Implementación Mock completa del backend Java Spring Boot de Shest Labs.
 /// Simula las tablas `users`, `wallets`, `meetings` y `escrows` (con el ID #45821
 /// y reunión WV-45821 requeridos en el documento maestro).
-class MockShestApi
-    implements
-        ShestAuthService,
-        ShestWalletService,
-        ShestP2PService,
-        ShestEscrowService,
-        ShestQrService {
+class MockShestApi implements ShestBackendAdapter {
   MockShestApi({required this.eventBus}) {
     _seedInitialData();
   }
 
   final WordverseEventBus eventBus;
+  @override
   bool simulateOffline = false;
   int _nextEscrowSeq = 45821;
   int _nextMeetingSeq = 45821;
@@ -675,12 +666,14 @@ class MockShestApi
   // CHAT (Fase 14)
   // ===========================================================================
 
+  @override
   List<WordverseChatMessage> getChatMessages(String channelId) {
     return _chatMessages
         .where((WordverseChatMessage m) => m.channelId == channelId)
         .toList();
   }
 
+  @override
   Future<WordverseChatMessage> sendChatMessage({
     required String senderId,
     required String senderName,

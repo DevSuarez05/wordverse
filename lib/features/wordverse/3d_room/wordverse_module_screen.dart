@@ -464,8 +464,19 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                                 )
                                 .toList(),
                             onChanged: (String? room) {
-                              if (room != null) {
-                                setState(() => _selectedSubRoom = room);
+                              if (room != null && room != _selectedSubRoom) {
+                                _multiplayer.switchRoom(
+                                  localUser: local.user,
+                                  newRoomName: room,
+                                );
+                                setState(() {
+                                  _selectedSubRoom = room;
+                                  _localAvatar = local.copyWith(
+                                    normX: RoomPhysicsController.spawnX,
+                                    normZ: RoomPhysicsController.spawnZ,
+                                    isMoving: false,
+                                  );
+                                });
                               }
                             },
                           ),

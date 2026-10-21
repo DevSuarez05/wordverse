@@ -146,6 +146,26 @@ class WordverseMultiplayerService {
     onStatusChanged?.call();
   }
 
+  /// Cambia de sub-sala dentro de WordVerse (Fase 8: Sala Principal, Networking, Negocios, P2P, Escrow).
+  void switchRoom({
+    required ShestUser localUser,
+    required String newRoomName,
+  }) {
+    if (_currentRoomName == newRoomName) return;
+    final String previousRoom = _currentRoomName;
+    eventBus.emit(
+      WordverseEventType.userLeftRoom,
+      '${localUser.name} salió de $previousRoom',
+      <String, Object?>{'userId': localUser.id, 'room': previousRoom},
+    );
+    _currentRoomName = newRoomName;
+    eventBus.emit(
+      WordverseEventType.userJoinedRoom,
+      '${localUser.name} entró a la sub-sala $newRoomName',
+      <String, Object?>{'userId': localUser.id, 'room': newRoomName},
+    );
+  }
+
   void leaveRoom(String localUserId) {
     _isConnected = false;
     _simulationTimer?.cancel();

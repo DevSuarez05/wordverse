@@ -3,8 +3,10 @@ import '../mocks/mock_shest_api.dart';
 import '../models/shest_models.dart';
 import 'auth_service.dart';
 import 'escrow_service.dart';
+import 'http_shest_api.dart';
 import 'p2p_service.dart';
 import 'qr_service.dart';
+import 'shest_backend_adapter.dart';
 import 'wallet_service.dart';
 
 /// Modos de entorno soportados para integración con Shest Labs (Entregable #19).
@@ -13,7 +15,10 @@ enum ShestBackendEnvironment {
   mock('Mock Shest Labs (Simulador Local)', 'mock://shest.local'),
 
   /// Modo de pruebas para 2 desarrolladores usando tablas en Supabase.
-  supabaseStaging('Supabase Staging (Dev 1 + Dev 2)', 'https://your-project.supabase.co'),
+  supabaseStaging(
+    'Supabase Staging (Dev 1 + Dev 2)',
+    'https://your-project.supabase.co/rest/v1',
+  ),
 
   /// API productiva en Java Spring Boot de Shest Labs.
   production('Shest Java Spring Boot API', 'https://api.shestlabs.com/v1');
@@ -25,31 +30,56 @@ enum ShestBackendEnvironment {
 
 /// Punto único de comunicación entre WordVerse y Shest Labs (Fase 1).
 ///
-/// Cuando Shest Labs entregue acceso al backend Java Spring Boot,
-/// únicamente se cambia el adaptador aquí sin tocar ni una sola línea de la Sala 3D.
+/// Conmuta dinámicamente entre [MockShestApi], Supabase Staging y la API Java
+/// de Shest Labs (`https://api.shestlabs.com/v1`) sin modificar la Sala 3D.
 class ShestApiClient {
   ShestApiClient({
     required this.eventBus,
     this.environment = ShestBackendEnvironment.mock,
-  }) : _backend = MockShestApi(eventBus: eventBus);
+  }) : _mockAdapter = MockShestApi(eventBus: eventBus) {
+    _supabaseAdapter = HttpShestApi(
+      baseUrl: ShestBackendEnvironment.supabaseStaging.baseUrl,
+      eventBus: eventBus,
+      fallbackMock: _mockAdapter,
+    );
+    _productionAdapter = HttpShestApi(
+      baseUrl: ShestBackendEnvironment.production.baseUrl,
+      eventBus: eventBus,
+      fallbackMock: _mockAdapter,
+    );
+  }
 
   final WordverseEventBus eventBus;
   ShestBackendEnvironment environment;
-  final MockShestApi _backend;
 
-  ShestAuthService get auth => _backend;
-  ShestWalletService get wallet => _backend;
-  ShestP2PService get p2p => _backend;
-  ShestEscrowService get escrow => _backend;
-  ShestQrService get qr => _backend;
+  final MockShestApi _mockAdapter;
+  late final HttpShestApi _supabaseAdapter;
+  late final HttpShestApi _productionAdapter;
+
+  ShestBackendAdapter get activeAdapter {
+    switch (environment) {
+      case ShestBackendEnvironment.mock:
+        return _mockAdapter;
+      case ShestBackendEnvironment.supabaseStaging:
+        return _supabaseAdapter;
+      case ShestBackendEnvironment.production:
+        return _productionAdapter;
+    }
+  }
+
+  ShestAuthService get auth => activeAdapter;
+  ShestWalletService get wallet => activeAdapter;
+  ShestP2PService get p2p => activeAdapter;
+  ShestEscrowService get escrow => activeAdapter;
+  ShestQrService get qr => activeAdapter;
 
   /// Permite simular caídas de red o errores del backend para validar Fase 34 y 35.
-  bool get simulateOffline => _backend.simulateOffline;
-  set simulateOffline(bool value) => _backend.simulateOffline = value;
+  bool get simulateOffline => activeAdapter.simulateOffline;
+  set simulateOffline(bool value) => activeAdapter.simulateOffline = value;
 
   /// Mensajes de chat almacenados en la sesión o reunión (Fase 14).
   List<WordverseChatMessage> getChatMessages(String channelId) =>
-      _backend.getChatMessages(channelId);
+      activeAdapter.getChatMessages(channelId);
 
   Future<WordverseChatMessage> sendChatMessage({
     required String senderId,
@@ -57,7 +87,7 @@ class ShestApiClient {
     required String channelId,
     required String text,
   }) =>
-      _backend.sendChatMessage(
+      activeAdapter.sendChatMessage(
         senderId: senderId,
         senderName: senderName,
         channelId: channelId,

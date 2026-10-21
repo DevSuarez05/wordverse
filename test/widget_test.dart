@@ -126,6 +126,18 @@ void main() {
       final WalletInfo recoveredWallet =
           await apiClient.wallet.getWalletInfo(session.user.id);
       expect(recoveredWallet.usdtBalance, greaterThan(0));
+
+      // PRUEBA 15: Conmutación de entorno ShestBackendEnvironment (Mock -> Supabase -> Production)
+      apiClient.environment = ShestBackendEnvironment.supabaseStaging;
+      final List<ShestUser> stagingUsers =
+          await apiClient.auth.searchUsers(query: 'Valeria');
+      expect(stagingUsers, isNotEmpty);
+
+      apiClient.environment = ShestBackendEnvironment.production;
+      final List<EscrowOperation> prodEscrows =
+          await apiClient.escrow.listEscrows(session.user.id);
+      expect(prodEscrows.first.id, equals('45821'));
+      apiClient.environment = ShestBackendEnvironment.mock;
     });
 
     testWidgets(
