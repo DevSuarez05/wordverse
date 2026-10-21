@@ -25,6 +25,9 @@ class Room3DViewport extends StatelessWidget {
     required this.cameraZoom,
     required this.onAvatarTapped,
     required this.onHotspotTapped,
+    this.cameraYaw = 0.0,
+    this.subRoomName = 'Sala Principal',
+    this.onFloorTapped,
     this.glbReport,
   });
 
@@ -33,8 +36,11 @@ class Room3DViewport extends StatelessWidget {
   final HotspotKind? activeHotspot;
   final double cameraPitch;
   final double cameraZoom;
+  final double cameraYaw;
+  final String subRoomName;
   final ValueChanged<AvatarRoomNode> onAvatarTapped;
   final ValueChanged<HotspotKind> onHotspotTapped;
+  final void Function(double normX, double normZ)? onFloorTapped;
   final GlbOptimizationReport? glbReport;
 
   /// Proyecta una coordenada 3D normalizada (x, z) en el plano del piso al lienzo 2D.
@@ -44,6 +50,7 @@ class Room3DViewport extends StatelessWidget {
     Size size, {
     double pitch = 0.62,
     double zoom = 1.0,
+    double yaw = 0.0,
   }) {
     return project3DToScreen(
       normX,
@@ -52,10 +59,11 @@ class Room3DViewport extends StatelessWidget {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
   }
 
-  /// Proyecta un vértice 3D completo (x, y, z) incluyendo su altura `normY` en perspectiva.
+  /// Proyecta un vértice 3D completo (x, y, z) incluyendo su altura `normY` y rotación orbital `yaw`.
   static Offset project3DToScreen(
     double normX,
     double normY,
@@ -63,16 +71,56 @@ class Room3DViewport extends StatelessWidget {
     Size size, {
     double pitch = 0.62,
     double zoom = 1.0,
+    double yaw = 0.0,
   }) {
+    final double cosY = math.cos(yaw);
+    final double sinY = math.sin(yaw);
+    final double rx = (normX * cosY) - (normZ * sinY);
+    final double rz = (normX * sinY) + (normZ * cosY);
+
     final double cx = size.width * 0.5;
     final double cy = size.height * 0.52;
     final double baseScale = math.min(size.width, size.height) * 0.42 * zoom;
 
-    final double depthFactor = 1.0 + (normZ * 0.28);
-    final double screenX = cx + (normX * baseScale * depthFactor);
+    final double depthFactor = 1.0 + (rz * 0.28);
+    final double screenX = cx + (rx * baseScale * depthFactor);
     final double elevationPx = normY * baseScale * 0.85 * depthFactor;
-    final double screenY = cy + (normZ * baseScale * pitch) - elevationPx;
+    final double screenY = cy + (rz * baseScale * pitch) - elevationPx;
     return Offset(screenX, screenY);
+  }
+
+  /// Desproyecta un toque en pantalla 2D a coordenadas (normX, normZ) del piso 3D.
+  static ({double normX, double normZ}) unprojectScreenToFloor(
+    Offset localPosition,
+    Size size, {
+    double pitch = 0.62,
+    double zoom = 1.0,
+    double yaw = 0.0,
+  }) {
+    final double cx = size.width * 0.5;
+    final double cy = size.height * 0.52;
+    final double baseScale = math.min(size.width, size.height) * 0.42 * zoom;
+    final double rz = ((localPosition.dy - cy) / (baseScale * pitch)).clamp(
+      -RoomPhysicsController.maxBound,
+      RoomPhysicsController.maxBound,
+    );
+    final double depthFactor = 1.0 + (rz * 0.28);
+    final double rx =
+        ((localPosition.dx - cx) / (baseScale * depthFactor)).clamp(
+          -RoomPhysicsController.maxBound,
+          RoomPhysicsController.maxBound,
+        );
+    final double cosY = math.cos(-yaw);
+    final double sinY = math.sin(-yaw);
+    final double normX = ((rx * cosY) - (rz * sinY)).clamp(
+      -RoomPhysicsController.maxBound,
+      RoomPhysicsController.maxBound,
+    );
+    final double normZ = ((rx * sinY) + (rz * cosY)).clamp(
+      -RoomPhysicsController.maxBound,
+      RoomPhysicsController.maxBound,
+    );
+    return (normX: normX, normZ: normZ);
   }
 
   @override
@@ -94,12 +142,29 @@ class Room3DViewport extends StatelessWidget {
           children: <Widget>[
             // 1. Escenario 3D + Malla binaria .GLB (Paredes 3D, Mesa Octogonal, Piso, Spawn)
             Positioned.fill(
-              child: CustomPaint(
-                painter: _Room3DScenePainter(
-                  pitch: cameraPitch,
-                  zoom: cameraZoom,
-                  activeHotspot: activeHotspot,
-                  glbReport: glbReport,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapUp: (TapUpDetails details) {
+                  if (onFloorTapped == null) return;
+                  final ({double normX, double normZ}) target =
+                      unprojectScreenToFloor(
+                        details.localPosition,
+                        canvasSize,
+                        pitch: cameraPitch,
+                        zoom: cameraZoom,
+                        yaw: cameraYaw,
+                      );
+                  onFloorTapped!(target.normX, target.normZ);
+                },
+                child: CustomPaint(
+                  painter: _Room3DScenePainter(
+                    pitch: cameraPitch,
+                    zoom: cameraZoom,
+                    yaw: cameraYaw,
+                    subRoomName: subRoomName,
+                    activeHotspot: activeHotspot,
+                    glbReport: glbReport,
+                  ),
                 ),
               ),
             ),
@@ -124,6 +189,7 @@ class Room3DViewport extends StatelessWidget {
       canvasSize,
       pitch: cameraPitch,
       zoom: cameraZoom,
+      yaw: cameraYaw,
     );
     final bool isHighlighted = activeHotspot == spot;
     final Color spotColor = _hotspotColor(spot);
@@ -194,6 +260,7 @@ class Room3DViewport extends StatelessWidget {
       canvasSize,
       pitch: cameraPitch,
       zoom: cameraZoom,
+      yaw: cameraYaw,
     );
     final Color avatarColor = Color(node.user.avatarHexColor);
 
@@ -347,28 +414,75 @@ class _Room3DScenePainter extends CustomPainter {
   _Room3DScenePainter({
     required this.pitch,
     required this.zoom,
+    required this.yaw,
+    required this.subRoomName,
     required this.activeHotspot,
     this.glbReport,
   });
 
   final double pitch;
   final double zoom;
+  final double yaw;
+  final String subRoomName;
   final HotspotKind? activeHotspot;
   final GlbOptimizationReport? glbReport;
 
+  Color _accentForSubRoom() {
+    switch (subRoomName) {
+      case 'Shest Café':
+        return const Color(0xFFD4AF37); // Oro Shest Coffee
+      case 'P2P':
+        return Colors.greenAccent;
+      case 'Escrow':
+        return Colors.amberAccent;
+      case 'Negocios':
+        return Colors.purpleAccent;
+      case 'Networking':
+        return Colors.lightBlueAccent;
+      default:
+        return Colors.cyanAccent;
+    }
+  }
+
+  List<Color> _bgGradientForSubRoom() {
+    if (subRoomName == 'Shest Café') {
+      return const <Color>[
+        Color(0xFF281E0D),
+        Color(0xFF140F07),
+        Color(0xFF080603),
+      ];
+    }
+    return const <Color>[
+      Color(0xFF162447),
+      Color(0xFF0A1124),
+      Color(0xFF050811),
+    ];
+  }
+
+  List<Color> _floorGradientForSubRoom() {
+    if (subRoomName == 'Shest Café') {
+      return <Color>[
+        const Color(0xFF2A2012).withValues(alpha: 0.92),
+        const Color(0xFF120E08).withValues(alpha: 0.96),
+      ];
+    }
+    return <Color>[
+      const Color(0xFF1B2A4A).withValues(alpha: 0.88),
+      const Color(0xFF0F1B33).withValues(alpha: 0.95),
+    ];
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
+    final Color roomAccent = _accentForSubRoom();
+
     // 1. Iluminación ambiental del espacio virtual 3D
     final Rect fullRect = Offset.zero & size;
     final Paint bgPaint = Paint()
-      ..shader = const RadialGradient(
-        center: Alignment(0.0, -0.2),
+      ..shader = RadialGradient(
+        center: const Alignment(0.0, -0.2),
         radius: 1.1,
-        colors: <Color>[
-          Color(0xFF162447),
-          Color(0xFF0A1124),
-          Color(0xFF050811),
-        ],
+        colors: _bgGradientForSubRoom(),
       ).createShader(fullRect);
     canvas.drawRect(fullRect, bgPaint);
 
@@ -380,6 +494,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
     final Offset topRight = Room3DViewport.projectToScreen(
       b,
@@ -387,6 +502,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
     final Offset bottomRight = Room3DViewport.projectToScreen(
       b,
@@ -394,6 +510,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
     final Offset bottomLeft = Room3DViewport.projectToScreen(
       -b,
@@ -401,6 +518,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
 
     final Path floorPath = Path()
@@ -414,16 +532,13 @@ class _Room3DScenePainter extends CustomPainter {
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
-        colors: <Color>[
-          const Color(0xFF1B2A4A).withValues(alpha: 0.88),
-          const Color(0xFF0F1B33).withValues(alpha: 0.95),
-        ],
+        colors: _floorGradientForSubRoom(),
       ).createShader(fullRect);
     canvas.drawPath(floorPath, floorPaint);
 
     // 3. Retícula 3D de perspectiva sobre el piso
     final Paint gridPaint = Paint()
-      ..color = Colors.cyanAccent.withValues(alpha: 0.14)
+      ..color = roomAccent.withValues(alpha: 0.16)
       ..strokeWidth = 1.0;
 
     for (int i = -4; i <= 4; i++) {
@@ -434,6 +549,7 @@ class _Room3DScenePainter extends CustomPainter {
         size,
         pitch: pitch,
         zoom: zoom,
+        yaw: yaw,
       );
       final Offset p2 = Room3DViewport.projectToScreen(
         t,
@@ -441,6 +557,7 @@ class _Room3DScenePainter extends CustomPainter {
         size,
         pitch: pitch,
         zoom: zoom,
+        yaw: yaw,
       );
       canvas.drawLine(p1, p2, gridPaint);
 
@@ -450,6 +567,7 @@ class _Room3DScenePainter extends CustomPainter {
         size,
         pitch: pitch,
         zoom: zoom,
+        yaw: yaw,
       );
       final Offset q2 = Room3DViewport.projectToScreen(
         b,
@@ -457,6 +575,7 @@ class _Room3DScenePainter extends CustomPainter {
         size,
         pitch: pitch,
         zoom: zoom,
+        yaw: yaw,
       );
       canvas.drawLine(q1, q2, gridPaint);
     }
@@ -467,10 +586,13 @@ class _Room3DScenePainter extends CustomPainter {
         report.vertices.isNotEmpty &&
         report.triangles.isNotEmpty) {
       final Paint meshFillPaint = Paint()
-        ..color = const Color(0xFF1F3A68).withValues(alpha: 0.46)
+        ..color = (subRoomName == 'Shest Café'
+                ? const Color(0xFF4A3718)
+                : const Color(0xFF1F3A68))
+            .withValues(alpha: 0.46)
         ..style = PaintingStyle.fill;
       final Paint meshWirePaint = Paint()
-        ..color = Colors.cyanAccent.withValues(alpha: 0.42)
+        ..color = roomAccent.withValues(alpha: 0.44)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2;
 
@@ -489,6 +611,7 @@ class _Room3DScenePainter extends CustomPainter {
             size,
             pitch: pitch,
             zoom: zoom,
+            yaw: yaw,
           );
           final Offset s1 = Room3DViewport.project3DToScreen(
             v1.x,
@@ -497,6 +620,7 @@ class _Room3DScenePainter extends CustomPainter {
             size,
             pitch: pitch,
             zoom: zoom,
+            yaw: yaw,
           );
           final Offset s2 = Room3DViewport.project3DToScreen(
             v2.x,
@@ -505,6 +629,7 @@ class _Room3DScenePainter extends CustomPainter {
             size,
             pitch: pitch,
             zoom: zoom,
+            yaw: yaw,
           );
 
           final Path triPath = Path()
@@ -520,7 +645,7 @@ class _Room3DScenePainter extends CustomPainter {
 
     // 5. Borde perimetral de Colisión de la Sala 3D
     final Paint wallPaint = Paint()
-      ..color = Colors.cyanAccent.withValues(alpha: 0.55)
+      ..color = roomAccent.withValues(alpha: 0.58)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.2;
     canvas.drawPath(floorPath, wallPaint);
@@ -532,6 +657,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
     final Paint spawnPaint = Paint()
       ..color = Colors.greenAccent.withValues(alpha: 0.35)
@@ -550,6 +676,7 @@ class _Room3DScenePainter extends CustomPainter {
       size,
       pitch: pitch,
       zoom: zoom,
+      yaw: yaw,
     );
     final double tableRadiusPx =
         math.min(size.width, size.height) *
@@ -574,6 +701,8 @@ class _Room3DScenePainter extends CustomPainter {
   bool shouldRepaint(covariant _Room3DScenePainter oldDelegate) {
     return oldDelegate.pitch != pitch ||
         oldDelegate.zoom != zoom ||
+        oldDelegate.yaw != yaw ||
+        oldDelegate.subRoomName != subRoomName ||
         oldDelegate.activeHotspot != activeHotspot ||
         oldDelegate.glbReport != glbReport;
   }

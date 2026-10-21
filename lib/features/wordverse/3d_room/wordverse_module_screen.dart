@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
 
@@ -7,6 +9,7 @@ import '../../../core/models/shest_models.dart';
 import '../avatar/avatar_node.dart';
 import '../meetings/escrow_p2p_modals.dart';
 import '../meetings/meetings_qr_modals.dart';
+import '../meetings/notifications_sheet.dart';
 import '../movement/room_physics_controller.dart';
 import '../multiplayer/multiplayer_service.dart';
 import 'glb_inspector.dart';
@@ -37,7 +40,9 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
 
   final double _cameraPitch = 0.62;
   double _cameraZoom = 1.0;
+  double _cameraYaw = 0.0;
   String _selectedSubRoom = 'Sala Principal';
+  String _selectedGateUserId = 'usr_1';
   late final TextEditingController _remoteUrlCtrl;
   late final TextEditingController _remoteKeyCtrl;
 
@@ -47,7 +52,15 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
     'Negocios',
     'P2P',
     'Escrow',
+    'Shest Café',
   ];
+
+  static const Map<String, String> _gateUsers = <String, String>{
+    'usr_1': 'usr_1 • Daniel (Tú) — Trader P2P & Dev',
+    'usr_2': 'usr_2 • Valeria Méndez — Comerciante Verificada USDT',
+    'usr_3': 'usr_3 • Carlos Mendoza — Director de Negocios Web3',
+    'usr_4': 'usr_4 • Sofía Herrera — Especialista Escrow & Arbitraje',
+  };
 
   @override
   void initState() {
@@ -149,6 +162,64 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
         rotation: step.rotation,
       );
     }
+  }
+
+  void _onFloorTapped(double targetX, double targetZ) {
+    final AvatarRoomNode? current = _localAvatar;
+    if (current == null) return;
+    final double dx = targetX - current.normX;
+    final double dz = targetZ - current.normZ;
+    final double dist = math.sqrt((dx * dx) + (dz * dz));
+    if (dist < 0.01) return;
+
+    // Respetar colisiones perimetrales y mesa central
+    double finalX = targetX.clamp(
+      -RoomPhysicsController.maxBound,
+      RoomPhysicsController.maxBound,
+    );
+    double finalZ = targetZ.clamp(
+      -RoomPhysicsController.maxBound,
+      RoomPhysicsController.maxBound,
+    );
+    final double distFromCenter = math.sqrt(
+      (finalX * finalX) + (finalZ * finalZ),
+    );
+    if (distFromCenter < RoomPhysicsController.centerTableRadius) {
+      final double safeScale =
+          (RoomPhysicsController.centerTableRadius + 0.04) /
+          (distFromCenter == 0 ? 1 : distFromCenter);
+      finalX *= safeScale;
+      finalZ *= safeScale;
+    }
+
+    final double rotation = math.atan2(dx, dz);
+    final HotspotKind? detectedHotspot =
+        RoomPhysicsController.detectNearbyHotspot(finalX, finalZ);
+
+    setState(() {
+      _localAvatar = current.copyWith(
+        normX: finalX,
+        normZ: finalZ,
+        rotationRadians: rotation,
+        isMoving: false,
+      );
+      _nearbyHotspot = detectedHotspot;
+    });
+
+    _multiplayer.broadcastLocalMove(
+      userId: current.user.id,
+      x: finalX,
+      z: finalZ,
+      rotation: rotation,
+    );
+  }
+
+  void _openNotificationsSheet() {
+    WordverseNotificationsSheet.show(
+      context: context,
+      eventBus: widget.apiClient.eventBus,
+      onSimulateErrorTest: _triggerReconnectFlow,
+    );
   }
 
   void _triggerEmote(WordverseEmote emote) {
@@ -349,6 +420,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                     const SizedBox(height: 14),
                     DropdownButtonFormField<ShestBackendEnvironment>(
                       initialValue: widget.apiClient.environment,
+                      isExpanded: true,
                       dropdownColor: const Color(0xFF162238),
                       style: const TextStyle(color: Colors.white, fontSize: 13),
                       decoration: const InputDecoration(
@@ -361,7 +433,10 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                             (ShestBackendEnvironment env) =>
                                 DropdownMenuItem<ShestBackendEnvironment>(
                                   value: env,
-                                  child: Text(env.label),
+                                  child: Text(
+                                    env.label,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                           )
                           .toList(),
@@ -374,6 +449,35 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                             _remoteKeyCtrl.text =
                                 widget.apiClient.currentRemoteKey;
                           });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: _selectedGateUserId,
+                      isExpanded: true,
+                      dropdownColor: const Color(0xFF162238),
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        labelText: 'Sesión de Usuario Shest (Fase 4 / Multi-User)',
+                        labelStyle: TextStyle(color: Colors.amberAccent),
+                        isDense: true,
+                      ),
+                      items: _gateUsers.entries
+                          .map(
+                            (MapEntry<String, String> entry) =>
+                                DropdownMenuItem<String>(
+                                  value: entry.key,
+                                  child: Text(
+                                    entry.value,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                          )
+                          .toList(),
+                      onChanged: (String? val) {
+                        if (val != null) {
+                          setState(() => _selectedGateUserId = val);
                         }
                       },
                     ),
@@ -424,7 +528,9 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                           backgroundColor: Colors.cyanAccent,
                           foregroundColor: Colors.black,
                         ),
-                        onPressed: () => _enterWordverseFromShestSession(),
+                        onPressed: () => _enterWordverseFromShestSession(
+                          userId: _selectedGateUserId,
+                        ),
                         icon: const Icon(Icons.login),
                         label: const Text(
                           'ENTRAR A LA SALA 3D CON SESIÓN SHEST',
@@ -458,7 +564,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
       body: SafeArea(
         child: Stack(
           children: <Widget>[
-            // 1. Escena 3D Interactiva (Sala + 7 Hotspots + Avatares)
+            // 1. Escena 3D Interactiva (Sala + 7 Hotspots + Avatares + Tap-to-walk)
             Positioned.fill(
               child: Room3DViewport(
                 localAvatar: local,
@@ -466,7 +572,10 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                 activeHotspot: _nearbyHotspot,
                 cameraPitch: _cameraPitch,
                 cameraZoom: _cameraZoom,
+                cameraYaw: _cameraYaw,
+                subRoomName: _selectedSubRoom,
                 glbReport: _glbReport,
+                onFloorTapped: _onFloorTapped,
                 onHotspotTapped: _handleHotspotAction,
                 onAvatarTapped: (AvatarRoomNode tappedNode) {
                   if (tappedNode.isLocalPlayer) {
@@ -484,7 +593,7 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
               ),
             ),
 
-            // 2. HUD Superior: Sesión Shest, Selector de Salas (Fase 8), Estado (Fase 16) y Reconexión (Fase 35)
+            // 2. HUD Superior: Sesión Shest, Selector de Salas (Fase 8), Estado (Fase 16), Eventos (Fase 31/32) y Reconexión (Fase 35)
             Positioned(
               top: 8,
               left: 10,
@@ -523,7 +632,9 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                                 .map(
                                   (String r) => DropdownMenuItem<String>(
                                     value: r,
-                                    child: Text('🏛️ $r'),
+                                    child: Text(
+                                      r == 'Shest Café' ? '☕ $r' : '🏛️ $r',
+                                    ),
                                   ),
                                 )
                                 .toList(),
@@ -579,6 +690,28 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                           ),
                         ),
 
+                        // Botón Centro de Notificaciones & Eventos (Fases 31, 32, 34)
+                        TextButton.icon(
+                          key: const Key('btn_notifications_center'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: _openNotificationsSheet,
+                          icon: const Icon(
+                            Icons.notifications_active,
+                            size: 15,
+                            color: Colors.amberAccent,
+                          ),
+                          label: Text(
+                            'Eventos (${events.length})',
+                            style: const TextStyle(
+                              color: Colors.amberAccent,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+
                         // Botón de Reconexión / Estado Realtime (Fase 35)
                         TextButton.icon(
                           key: const Key('btn_reconnect'),
@@ -609,24 +742,42 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Ticker de Eventos Internos (Fase 32)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xBB081020),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      latestEventText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.amberAccent,
-                        fontSize: 10.5,
-                        fontFamily: 'monospace',
+                  // Ticker de Eventos Internos (Fase 32) -> Tocable para abrir Centro de Notificaciones
+                  InkWell(
+                    onTap: _openNotificationsSheet,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xBB081020),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              latestEventText,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.amberAccent,
+                                fontSize: 10.5,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                          ),
+                          const Text(
+                            'Ver historial ›',
+                            style: TextStyle(
+                              color: Colors.cyanAccent,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -665,10 +816,30 @@ class _WordverseModuleScreenState extends State<WordverseModuleScreen> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  // Controles de Cámara 3D (Zoom / Ángulo)
+                  // Controles de Cámara 3D (Rotación Orbital 360° + Zoom)
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
+                      IconButton.filledTonal(
+                        key: const Key('btn_rotate_left'),
+                        tooltip: 'Rotar cámara 3D a la izquierda',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setState(
+                          () => _cameraYaw -= 0.28,
+                        ),
+                        icon: const Icon(Icons.rotate_left, size: 18),
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton.filledTonal(
+                        key: const Key('btn_rotate_right'),
+                        tooltip: 'Rotar cámara 3D a la derecha',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => setState(
+                          () => _cameraYaw += 0.28,
+                        ),
+                        icon: const Icon(Icons.rotate_right, size: 18),
+                      ),
+                      const SizedBox(width: 4),
                       IconButton.filledTonal(
                         tooltip: 'Acercar cámara 3D',
                         visualDensity: VisualDensity.compact,
