@@ -1,0 +1,11 @@
+{
+  "name": "wordverse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WordVerse 3D - Global Business Hub (Shest Labs)",
+  "scripts": {
+    "dev": "..\\flutter\\bin\\flutter.bat run -d web-server --web-port 8080 --web-hostname 127.0.0.1",
+    "test": "..\\flutter\\bin\\flutter.bat test",
+    "analyze": "..\\flutter\\bin\\flutter.bat analyze"
+  }
+}

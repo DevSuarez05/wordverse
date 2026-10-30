@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../config/wordverse_env_config.dart';
 import '../events/wordverse_events.dart';
 import '../mocks/mock_shest_api.dart';
 import '../models/shest_models.dart';
@@ -13,42 +14,121 @@ import 'shest_backend_adapter.dart';
 ///
 /// Soporta lectura y escritura real sobre las tablas `users`, `wallets`, `meetings`
 /// y `escrows` de [supabase_schema.sql], con fallback transparente a [MockShestApi]
-/// cuando aún no se han ingresado credenciales remotas.
+/// cuando aún no se han ingresado credenciales remotas, o propagación estricta de
+/// errores cuando [strictRemoteErrors] está habilitado (mitigación RSK-03).
 class HttpShestApi implements ShestBackendAdapter {
   HttpShestApi({
     required this.baseUrl,
     required this.eventBus,
     required this.fallbackMock,
     this.apiKeyOrToken = '',
+    this.environmentName = 'remote',
+    this.strictRemoteErrors = WordverseEnvConfig.envStrictHttp,
     http.Client? httpClient,
   }) : _http = httpClient ?? http.Client();
 
   String baseUrl;
   String apiKeyOrToken;
+  final String environmentName;
+  bool strictRemoteErrors;
   final WordverseEventBus eventBus;
   final MockShestApi fallbackMock;
   final http.Client _http;
 
   bool get hasLiveCredentials =>
-      baseUrl.trim().isNotEmpty &&
-      !baseUrl.contains('your-project.supabase.co') &&
-      !baseUrl.contains('mock://') &&
+      WordverseEnvConfig.isConfiguredRemoteUrl(baseUrl) &&
       apiKeyOrToken.trim().isNotEmpty;
 
-  String get _normalizedRestUrl {
-    final String clean = baseUrl.trim().replaceAll(RegExp(r'/$'), '');
-    if (clean.contains('.supabase.co') && !clean.endsWith('/rest/v1')) {
-      return '$clean/rest/v1';
-    }
-    return clean;
+  bool get isSupabase =>
+      _normalizedRestUrl.contains('supabase.co') ||
+      _normalizedRestUrl.contains('/rest/v1');
+
+  String? lastRefreshToken;
+
+  String get maskedCredential => WordverseEnvConfig.maskSecret(apiKeyOrToken);
+
+  String get _normalizedRestUrl => WordverseEnvConfig.normalizeRestUrl(baseUrl);
+
+  Map<String, String> buildHeaders({String? traceId}) {
+    final String activeTrace =
+        traceId ?? WordverseEnvConfig.generateTraceId('WV-HTTP');
+    return <String, String>{
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+      'X-WordVerse-Client-Version': WordverseEnvConfig.clientVersion,
+      'X-WordVerse-Environment': environmentName,
+      'X-WordVerse-Trace-Id': activeTrace,
+      if (apiKeyOrToken.isNotEmpty) 'Authorization': 'Bearer $apiKeyOrToken',
+      if (apiKeyOrToken.isNotEmpty && isSupabase) 'apikey': apiKeyOrToken,
+    };
   }
 
-  Map<String, String> get _headers => <String, String>{
-    'Content-Type': 'application/json',
-    'Prefer': 'return=representation',
-    if (apiKeyOrToken.isNotEmpty) 'Authorization': 'Bearer $apiKeyOrToken',
-    if (apiKeyOrToken.isNotEmpty) 'apikey': apiKeyOrToken,
-  };
+  Map<String, String> get _headers => buildHeaders();
+
+  Future<http.Response> _executeWith401Refresh({
+    required Future<http.Response> Function(Map<String, String> headers) requestFn,
+    required String operation,
+    String? traceId,
+  }) async {
+    final String activeTrace =
+        traceId ?? WordverseEnvConfig.generateTraceId('WV-HTTP');
+    final http.Response res = await requestFn(buildHeaders(traceId: activeTrace));
+
+    if (res.statusCode == 401 &&
+        lastRefreshToken != null &&
+        lastRefreshToken!.isNotEmpty) {
+      eventBus.emit(
+        WordverseEventType.authSessionChanged,
+        'Token JWT expirado (HTTP 401 en $operation). Iniciando renovación automática...',
+        <String, Object?>{'operation': operation, 'traceId': activeTrace},
+      );
+      try {
+        await refreshSession(lastRefreshToken!);
+        return await requestFn(buildHeaders(traceId: activeTrace));
+      } catch (e) {
+        eventBus.emit(
+          WordverseEventType.apiError,
+          'Renovación automática fallida tras 401 en $operation: $e',
+          <String, Object?>{'operation': operation},
+          WordverseEventSeverity.error,
+          activeTrace,
+        );
+      }
+    }
+
+    return res;
+  }
+
+  void _handleRemoteHttpFailure({
+    required String operation,
+    required int statusCode,
+    required String body,
+    required String traceId,
+  }) {
+    eventBus.emit(
+      WordverseEventType.apiError,
+      '[$operation] HTTP $statusCode en $_normalizedRestUrl (cred: $maskedCredential)',
+      <String, Object?>{
+        'operation': operation,
+        'statusCode': statusCode,
+        'environment': environmentName,
+        'maskedCredential': maskedCredential,
+      },
+      WordverseEventSeverity.error,
+      traceId,
+    );
+    if (strictRemoteErrors) {
+      final String code =
+          (statusCode == 401 || statusCode == 403) ? 'UNAUTHORIZED' : 'HTTP_$statusCode';
+      throw ShestApiException(
+        code: code,
+        userMessage:
+            'Error del servidor Shest ($statusCode) en $operation.',
+        statusCode: statusCode,
+        traceId: traceId,
+      );
+    }
+  }
 
   @override
   bool get simulateOffline => fallbackMock.simulateOffline;
@@ -136,61 +216,134 @@ class HttpShestApi implements ShestBackendAdapter {
   }) async {
     _checkOnline();
     if (hasLiveCredentials) {
+      final String traceId = WordverseEnvConfig.generateTraceId('WV-AUTH');
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/users?id=eq.$userId&select=*',
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/users?id=eq.$userId&select=*')
+            : Uri.parse('$_normalizedRestUrl/users/me?userId=$userId');
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(WordverseEnvConfig.defaultHttpTimeout),
+          operation: 'loginWithShestSession',
+          traceId: traceId,
         );
-        final http.Response res = await _http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 5));
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
-          if (rows.isNotEmpty) {
-            final ShestUser user = _parseUserRow(
-              rows.first as Map<String, Object?>,
-            );
+          final dynamic body = jsonDecode(res.body);
+          final Map<String, Object?>? row = (body is List && body.isNotEmpty)
+              ? (body.first as Map<String, Object?>)
+              : (body is Map<String, Object?> ? body : null);
+          if (row != null) {
+            final ShestUser user = _parseUserRow(row);
+            final String refreshToken = 'refresh_${user.id}';
+            lastRefreshToken = refreshToken;
             return ShestAuthSession(
               accessToken: apiKeyOrToken,
-              refreshToken: 'refresh_${user.id}',
+              refreshToken: refreshToken,
               user: user,
               expiresAt: DateTime.now().add(const Duration(hours: 8)),
             );
           }
+        } else {
+          _handleRemoteHttpFailure(
+            operation: 'loginWithShestSession',
+            statusCode: res.statusCode,
+            body: res.body,
+            traceId: traceId,
+          );
         }
+      } on ShestApiException {
+        rethrow;
       } catch (_) {
         // Fallback seguro al mock local si el servidor remoto no responde
       }
     }
-    return fallbackMock.loginWithShestSession(userId: userId);
+    final ShestAuthSession session = await fallbackMock.loginWithShestSession(userId: userId);
+    lastRefreshToken ??= session.refreshToken;
+    return session;
   }
 
   @override
-  Future<ShestAuthSession> refreshSession(String refreshToken) =>
-      loginWithShestSession(userId: 'usr_1');
+  Future<ShestAuthSession> refreshSession(String refreshToken) async {
+    _checkOnline();
+    if (hasLiveCredentials) {
+      final String traceId = WordverseEnvConfig.generateTraceId('WV-REFRESH');
+      try {
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/auth/v1/token?grant_type=refresh_token')
+            : Uri.parse('$_normalizedRestUrl/auth/refresh');
+        final Map<String, Object?> payload = isSupabase
+            ? <String, Object?>{'refresh_token': refreshToken}
+            : <String, Object?>{'refreshToken': refreshToken};
+        final http.Response res = await _http
+            .post(
+              uri,
+              headers: buildHeaders(traceId: traceId),
+              body: jsonEncode(payload),
+            )
+            .timeout(WordverseEnvConfig.defaultHttpTimeout);
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final Map<String, Object?> data =
+              jsonDecode(res.body) as Map<String, Object?>;
+          final String newAccess = (data['accessToken'] as String?) ??
+              (data['access_token'] as String?) ??
+              apiKeyOrToken;
+          final String newRefresh = (data['refreshToken'] as String?) ??
+              (data['refresh_token'] as String?) ??
+              refreshToken;
+          apiKeyOrToken = newAccess;
+          lastRefreshToken = newRefresh;
+          eventBus.emit(
+            WordverseEventType.authSessionChanged,
+            'Token JWT renovado exitosamente ($maskedCredential)',
+            <String, Object?>{'refreshed': true},
+          );
+          return await loginWithShestSession(userId: 'usr_1');
+        } else {
+          _handleRemoteHttpFailure(
+            operation: 'refreshSession',
+            statusCode: res.statusCode,
+            body: res.body,
+            traceId: traceId,
+          );
+        }
+      } on ShestApiException {
+        rethrow;
+      } catch (_) {}
+    }
+    final ShestAuthSession session = await fallbackMock.refreshSession(refreshToken);
+    lastRefreshToken = session.refreshToken;
+    return session;
+  }
 
   @override
   Future<List<ShestUser>> searchUsers({String query = ''}) async {
     _checkOnline();
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse('$_normalizedRestUrl/users?select=*');
-        final http.Response res = await _http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 5));
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/users?select=*')
+            : Uri.parse(
+                '$_normalizedRestUrl/users/search?q=${Uri.encodeComponent(query)}',
+              );
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(const Duration(seconds: 5)),
+          operation: 'searchUsers',
+        );
         if (res.statusCode >= 200 && res.statusCode < 300) {
           final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
           final List<ShestUser> users = rows
               .whereType<Map<String, Object?>>()
               .map(_parseUserRow)
               .toList();
+          if (!isSupabase) return users;
           final String q = query.trim().toLowerCase();
           if (q.isEmpty) return users;
           return users
               .where(
                 (ShestUser u) =>
                     u.name.toLowerCase().contains(q) ||
-                    u.company.toLowerCase().contains(q) ||
-                    u.role.toLowerCase().contains(q),
+                    u.company.toLowerCase().contains(q),
               )
               .toList();
         }
@@ -273,25 +426,37 @@ class HttpShestApi implements ShestBackendAdapter {
     _checkOnline();
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/wallets?user_id=eq.$userId&select=*',
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/wallets?user_id=eq.$userId&select=*')
+            : Uri.parse('$_normalizedRestUrl/wallet/$userId/balance');
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(const Duration(seconds: 5)),
+          operation: 'getWalletInfo',
         );
-        final http.Response res = await _http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 5));
         if (res.statusCode >= 200 && res.statusCode < 300) {
-          final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
-          if (rows.isNotEmpty) {
-            final Map<String, Object?> row = rows.first as Map<String, Object?>;
+          final dynamic body = jsonDecode(res.body);
+          if (isSupabase && body is List && body.isNotEmpty) {
+            final Map<String, Object?> row = body.first as Map<String, Object?>;
             return WalletInfo(
               userId: userId,
               usdtBalance: (row['balance_usdt'] as num?)?.toDouble() ?? 0.0,
-              trc20Address:
-                  (row['trc20_address'] as String?) ??
+              trc20Address: (row['trc20_address'] as String?) ??
                   'TShestWordVerseTRC20Address',
               recentTransactions: const <String>[
                 'Balance sincronizado en tiempo real con Supabase/Shest',
               ],
+            );
+          } else if (!isSupabase && body is Map<String, Object?>) {
+            return WalletInfo(
+              userId: userId,
+              usdtBalance: (body['balance_usdt'] as num?)?.toDouble() ?? 0.0,
+              trc20Address: (body['trc20_address'] as String?) ??
+                  'TShestWordVerseTRC20Address',
+              recentTransactions: (body['recentTransactions'] as List<dynamic>?)
+                      ?.map((dynamic e) => e.toString())
+                      .toList() ??
+                  const <String>['Balance sincronizado con Spring Boot API'],
             );
           }
         }
@@ -306,12 +471,49 @@ class HttpShestApi implements ShestBackendAdapter {
     required String toUserId,
     required double amountUsdt,
     required String concept,
-  }) => fallbackMock.createPayment(
-    fromUserId: fromUserId,
-    toUserId: toUserId,
-    amountUsdt: amountUsdt,
-    concept: concept,
-  );
+  }) async {
+    _checkOnline();
+    if (hasLiveCredentials && !isSupabase) {
+      try {
+        final Uri uri = Uri.parse('$_normalizedRestUrl/payments/create');
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => _http
+              .post(
+                uri,
+                headers: h,
+                body: jsonEncode(<String, Object?>{
+                  'fromUserId': fromUserId,
+                  'toUserId': toUserId,
+                  'amountUsdt': amountUsdt,
+                  'concept': concept,
+                }),
+              )
+              .timeout(const Duration(seconds: 5)),
+          operation: 'createPayment',
+        );
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final Map<String, Object?> data =
+              jsonDecode(res.body) as Map<String, Object?>;
+          return PaymentRecord(
+            id: (data['id'] as String?) ?? 'PAY-SPRING',
+            fromUserId: fromUserId,
+            toUserId: toUserId,
+            toUserName: (data['toUserName'] as String?) ?? toUserId,
+            amountUsdt: amountUsdt,
+            concept: concept,
+            status: (data['status'] as String?) ?? 'CONFIRMED',
+            timestamp: DateTime.now(),
+          );
+        }
+      } catch (_) {}
+    }
+    return fallbackMock.createPayment(
+      fromUserId: fromUserId,
+      toUserId: toUserId,
+      amountUsdt: amountUsdt,
+      concept: concept,
+    );
+  }
 
   @override
   Future<List<PaymentRecord>> getPaymentHistory(String userId) =>
@@ -319,6 +521,8 @@ class HttpShestApi implements ShestBackendAdapter {
 
   P2POperation _parseP2PRow(Map<String, Object?> row) {
     final String stateStr = (row['estado'] as String?) ?? 'OPEN';
+    final String? typeCode =
+        (row['tipo'] as String?) ?? (row['type'] as String?);
     return P2POperation(
       id: (row['id'] as String?) ?? 'p2p_901',
       makerId: (row['maker_id'] as String?) ?? 'usr_2',
@@ -328,11 +532,13 @@ class HttpShestApi implements ShestBackendAdapter {
       paymentMethod:
           (row['metodo_pago'] as String?) ?? 'Transferencia Bancaria',
       status: stateStr,
+      type: P2POperationType.fromCode(typeCode),
     );
   }
 
   /// Verifica en vivo la conexión contra Supabase PostgREST o el Backend Java de Shest.
   Future<({bool ok, String message})> verifyRemoteConnection() async {
+    final String traceId = WordverseEnvConfig.generateTraceId('WV-PROBE');
     if (!hasLiveCredentials) {
       return (
         ok: false,
@@ -340,37 +546,65 @@ class HttpShestApi implements ShestBackendAdapter {
             'Falta ingresar la URL de tu proyecto Supabase y el SUPABASE_ANON_KEY (actualmente usando fallback Mock local).',
       );
     }
+    final Stopwatch sw = Stopwatch()..start();
     try {
       final Uri uri = Uri.parse('$_normalizedRestUrl/users?select=id,nombre');
       final http.Response res = await _http
-          .get(uri, headers: _headers)
-          .timeout(const Duration(seconds: 6));
+          .get(uri, headers: buildHeaders(traceId: traceId))
+          .timeout(WordverseEnvConfig.healthCheckTimeout);
+      sw.stop();
       if (res.statusCode >= 200 && res.statusCode < 300) {
         final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
         return (
           ok: true,
           message:
-              'Conectado en vivo a $_normalizedRestUrl (${rows.length} usuarios sincronizados en base de datos).',
+              'Conectado en vivo a $_normalizedRestUrl (${rows.length} usuarios sincronizados • ${sw.elapsedMilliseconds} ms).',
         );
       } else if (res.statusCode == 404 || res.body.contains('42P01')) {
+        _handleRemoteHttpFailure(
+          operation: 'verifyRemoteConnection',
+          statusCode: res.statusCode,
+          body: res.body,
+          traceId: traceId,
+        );
         return (
           ok: false,
           message:
               'Conectado al servidor (HTTP ${res.statusCode}), pero faltan las tablas. Copia y ejecuta supabase_schema.sql en el SQL Editor de Supabase.',
         );
       } else if (res.statusCode == 401 || res.statusCode == 403) {
+        _handleRemoteHttpFailure(
+          operation: 'verifyRemoteConnection',
+          statusCode: res.statusCode,
+          body: res.body,
+          traceId: traceId,
+        );
         return (
           ok: false,
           message:
-              'Credenciales rechazadas (HTTP ${res.statusCode}). Verifica tu SUPABASE_ANON_KEY o Bearer Token.',
+              'Credenciales rechazadas (HTTP ${res.statusCode}). Verifica tu SUPABASE_ANON_KEY o Bearer Token ($maskedCredential).',
         );
       } else {
+        _handleRemoteHttpFailure(
+          operation: 'verifyRemoteConnection',
+          statusCode: res.statusCode,
+          body: res.body,
+          traceId: traceId,
+        );
         return (
           ok: false,
           message: 'Respuesta HTTP ${res.statusCode}: ${res.body}',
         );
       }
     } catch (e) {
+      sw.stop();
+      eventBus.emit(
+        WordverseEventType.apiError,
+        '[verifyRemoteConnection] Excepción de red en $_normalizedRestUrl',
+        <String, Object?>{'error': '$e', 'environment': environmentName},
+        WordverseEventSeverity.error,
+        traceId,
+      );
       return (
         ok: false,
         message: 'No se pudo conectar a $_normalizedRestUrl: $e',
@@ -379,26 +613,58 @@ class HttpShestApi implements ShestBackendAdapter {
   }
 
   @override
-  Future<List<P2POperation>> listOperations() async {
+  Future<List<P2POperation>> listOperations({
+    P2POperationType? typeFilter,
+    String? paymentMethodFilter,
+    String? query,
+  }) async {
     _checkOnline();
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/p2p_operations?select=*&order=created_at.desc',
+        final Uri uri = isSupabase
+            ? Uri.parse(
+                '$_normalizedRestUrl/p2p_operations?select=*&order=created_at.desc',
+              )
+            : Uri.parse('$_normalizedRestUrl/p2p/orders');
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(const Duration(seconds: 5)),
+          operation: 'listOperations',
         );
-        final http.Response res = await _http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 5));
         if (res.statusCode >= 200 && res.statusCode < 300) {
           final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
-          return rows
+          Iterable<P2POperation> list = rows
               .whereType<Map<String, Object?>>()
-              .map(_parseP2PRow)
-              .toList();
+              .map(_parseP2PRow);
+          if (typeFilter != null) {
+            list = list.where((P2POperation o) => o.type == typeFilter);
+          }
+          if (paymentMethodFilter != null &&
+              paymentMethodFilter.isNotEmpty &&
+              paymentMethodFilter != 'ALL') {
+            list = list.where(
+              (P2POperation o) => o.paymentMethod.toLowerCase().contains(
+                paymentMethodFilter.toLowerCase(),
+              ),
+            );
+          }
+          if (query != null && query.trim().isNotEmpty) {
+            final String q = query.trim().toLowerCase();
+            list = list.where(
+              (P2POperation o) =>
+                  o.makerName.toLowerCase().contains(q) ||
+                  o.id.toLowerCase().contains(q),
+            );
+          }
+          return list.toList();
         }
       } catch (_) {}
     }
-    return fallbackMock.listOperations();
+    return fallbackMock.listOperations(
+      typeFilter: typeFilter,
+      paymentMethodFilter: paymentMethodFilter,
+      query: query,
+    );
   }
 
   @override
@@ -407,6 +673,10 @@ class HttpShestApi implements ShestBackendAdapter {
     required double amountUsdt,
     required double rateUsd,
     required String paymentMethod,
+    P2POperationType type = P2POperationType.sell,
+    double? minAmountUsdt,
+    double? maxAmountUsdt,
+    String? notes,
   }) async {
     _checkOnline();
     final P2POperation createdLocal = await fallbackMock.createOperation(
@@ -414,25 +684,43 @@ class HttpShestApi implements ShestBackendAdapter {
       amountUsdt: amountUsdt,
       rateUsd: rateUsd,
       paymentMethod: paymentMethod,
+      type: type,
+      minAmountUsdt: minAmountUsdt,
+      maxAmountUsdt: maxAmountUsdt,
+      notes: notes,
     );
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse('$_normalizedRestUrl/p2p_operations');
-        await _http
-            .post(
-              uri,
-              headers: _headers,
-              body: jsonEncode(<String, Object?>{
-                'id': createdLocal.id,
-                'maker_id': createdLocal.makerId,
-                'maker_nombre': createdLocal.makerName,
-                'monto_usdt': createdLocal.amountUsdt,
-                'tasa_usd': createdLocal.rateUsd,
-                'metodo_pago': createdLocal.paymentMethod,
-                'estado': 'OPEN',
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/p2p_operations')
+            : Uri.parse('$_normalizedRestUrl/p2p/orders');
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => _http
+              .post(
+                uri,
+                headers: h,
+                body: jsonEncode(isSupabase
+                    ? <String, Object?>{
+                        'id': createdLocal.id,
+                        'maker_id': createdLocal.makerId,
+                        'maker_nombre': createdLocal.makerName,
+                        'monto_usdt': createdLocal.amountUsdt,
+                        'tasa_usd': createdLocal.rateUsd,
+                        'metodo_pago': createdLocal.paymentMethod,
+                        'tipo': createdLocal.type.code,
+                        'estado': 'OPEN',
+                      }
+                    : <String, Object?>{
+                        'makerId': createdLocal.makerId,
+                        'amountUsdt': createdLocal.amountUsdt,
+                        'rateUsd': createdLocal.rateUsd,
+                        'paymentMethod': createdLocal.paymentMethod,
+                        'type': createdLocal.type.code,
+                      }),
+              )
+              .timeout(const Duration(seconds: 5)),
+          operation: 'createOperation',
+        );
       } catch (_) {}
     }
     return createdLocal;
@@ -450,16 +738,30 @@ class HttpShestApi implements ShestBackendAdapter {
     );
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/p2p_operations?id=eq.$operationId',
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/p2p_operations?id=eq.$operationId')
+            : Uri.parse('$_normalizedRestUrl/p2p/orders/$operationId/accept');
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => isSupabase
+              ? _http
+                  .patch(
+                    uri,
+                    headers: h,
+                    body: jsonEncode(<String, Object?>{
+                      'estado': 'COMPLETED',
+                      'taker_id': takerId,
+                    }),
+                  )
+                  .timeout(const Duration(seconds: 5))
+              : _http
+                  .post(
+                    uri,
+                    headers: h,
+                    body: jsonEncode(<String, Object?>{'takerId': takerId}),
+                  )
+                  .timeout(const Duration(seconds: 5)),
+          operation: 'acceptOperation',
         );
-        await _http
-            .patch(
-              uri,
-              headers: _headers,
-              body: jsonEncode(<String, Object?>{'estado': 'IN_ESCROW'}),
-            )
-            .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
     return acceptedLocal;
@@ -473,16 +775,23 @@ class HttpShestApi implements ShestBackendAdapter {
     );
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/p2p_operations?id=eq.$operationId',
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/p2p_operations?id=eq.$operationId')
+            : Uri.parse('$_normalizedRestUrl/p2p/orders/$operationId/cancel');
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => isSupabase
+              ? _http
+                  .patch(
+                    uri,
+                    headers: h,
+                    body: jsonEncode(<String, Object?>{'estado': 'CANCELLED'}),
+                  )
+                  .timeout(const Duration(seconds: 5))
+              : _http
+                  .post(uri, headers: h, body: jsonEncode(<String, Object?>{}))
+                  .timeout(const Duration(seconds: 5)),
+          operation: 'cancelOperation',
         );
-        await _http
-            .patch(
-              uri,
-              headers: _headers,
-              body: jsonEncode(<String, Object?>{'estado': 'CANCELLED'}),
-            )
-            .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
     return cancelledLocal;
@@ -493,12 +802,14 @@ class HttpShestApi implements ShestBackendAdapter {
     _checkOnline();
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse(
-          '$_normalizedRestUrl/escrows?select=*&order=created_at.desc',
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/escrows?select=*&order=created_at.desc')
+            : Uri.parse('$_normalizedRestUrl/escrows?userId=$userId');
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(const Duration(seconds: 5)),
+          operation: 'listEscrows',
         );
-        final http.Response res = await _http
-            .get(uri, headers: _headers)
-            .timeout(const Duration(seconds: 5));
         if (res.statusCode >= 200 && res.statusCode < 300) {
           final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
           return rows
@@ -532,24 +843,36 @@ class HttpShestApi implements ShestBackendAdapter {
     if (hasLiveCredentials) {
       try {
         final Uri uri = Uri.parse('$_normalizedRestUrl/escrows');
-        await _http
-            .post(
-              uri,
-              headers: _headers,
-              body: jsonEncode(<String, Object?>{
-                'id': createdLocal.id,
-                'creador_id': createdLocal.creatorId,
-                'creador_nombre': createdLocal.creatorName,
-                'contraparte_id': createdLocal.counterpartyId,
-                'contraparte_nombre': createdLocal.counterpartyName,
-                'monto': createdLocal.amount,
-                'moneda': createdLocal.currency,
-                'descripcion': createdLocal.description,
-                'condiciones': createdLocal.conditions,
-                'estado': createdLocal.status.apiValue,
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => _http
+              .post(
+                uri,
+                headers: h,
+                body: jsonEncode(isSupabase
+                    ? <String, Object?>{
+                        'id': createdLocal.id,
+                        'creador_id': createdLocal.creatorId,
+                        'creador_nombre': createdLocal.creatorName,
+                        'contraparte_id': createdLocal.counterpartyId,
+                        'contraparte_nombre': createdLocal.counterpartyName,
+                        'monto': createdLocal.amount,
+                        'moneda': createdLocal.currency,
+                        'descripcion': createdLocal.description,
+                        'condiciones': createdLocal.conditions,
+                        'estado': createdLocal.status.apiValue,
+                      }
+                    : <String, Object?>{
+                        'creatorId': createdLocal.creatorId,
+                        'counterpartyId': createdLocal.counterpartyId,
+                        'amount': createdLocal.amount,
+                        'currency': createdLocal.currency,
+                        'description': createdLocal.description,
+                        'conditions': createdLocal.conditions,
+                      }),
+              )
+              .timeout(const Duration(seconds: 5)),
+          operation: 'createEscrow',
+        );
       } catch (_) {}
     }
     return createdLocal;
@@ -570,19 +893,91 @@ class HttpShestApi implements ShestBackendAdapter {
         );
     if (hasLiveCredentials) {
       try {
-        final Uri uri = Uri.parse('$_normalizedRestUrl/escrows?id=eq.$escrowId');
-        await _http
-            .patch(
-              uri,
-              headers: _headers,
-              body: jsonEncode(<String, Object?>{
-                'estado': targetStatus.apiValue,
-              }),
-            )
-            .timeout(const Duration(seconds: 5));
+        final Uri uri = isSupabase
+            ? Uri.parse('$_normalizedRestUrl/escrows?id=eq.$escrowId')
+            : Uri.parse('$_normalizedRestUrl/escrows/$escrowId/state');
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => _http
+              .patch(
+                uri,
+                headers: h,
+                body: jsonEncode(isSupabase
+                    ? <String, Object?>{'estado': targetStatus.apiValue}
+                    : <String, Object?>{
+                        'actorUserId': actorUserId,
+                        'targetStatus': targetStatus.apiValue,
+                      }),
+              )
+              .timeout(const Duration(seconds: 5)),
+          operation: 'transitionEscrowState',
+        );
       } catch (_) {}
     }
     return updatedLocal;
+  }
+
+  /// Actualiza o registra la presencia del usuario en la sala multiplayer (WV-601).
+  Future<void> updateRoomPresence({
+    required String userId,
+    required String roomName,
+    required double posX,
+    required double posZ,
+    required double rotation,
+    String? emote,
+    bool online = true,
+  }) async {
+    _checkOnline();
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse('$_normalizedRestUrl/room_presence');
+        await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) => _http
+              .post(
+                uri,
+                headers: <String, String>{
+                  ...h,
+                  'Prefer': 'resolution=merge-duplicates',
+                },
+                body: jsonEncode(<String, Object?>{
+                  'user_id': userId,
+                  'sala': roomName,
+                  'pos_x': posX,
+                  'pos_z': posZ,
+                  'rotacion': rotation,
+                  'emote': ?emote,
+                  'online': online,
+                  'updated_at': DateTime.now().toIso8601String(),
+                }),
+              )
+              .timeout(const Duration(seconds: 4)),
+          operation: 'updateRoomPresence',
+        );
+      } catch (_) {}
+    }
+  }
+
+  /// Consulta la presencia de avatares en una sala específica (WV-601).
+  Future<List<Map<String, Object?>>> getRoomPresence({
+    required String roomName,
+  }) async {
+    _checkOnline();
+    if (hasLiveCredentials) {
+      try {
+        final Uri uri = Uri.parse(
+          '$_normalizedRestUrl/room_presence?sala=eq.$roomName&online=eq.true&select=*',
+        );
+        final http.Response res = await _executeWith401Refresh(
+          requestFn: (Map<String, String> h) =>
+              _http.get(uri, headers: h).timeout(const Duration(seconds: 4)),
+          operation: 'getRoomPresence',
+        );
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          final List<Object?> rows = jsonDecode(res.body) as List<Object?>;
+          return rows.whereType<Map<String, Object?>>().toList();
+        }
+      } catch (_) {}
+    }
+    return const <Map<String, Object?>>[];
   }
 
   @override
@@ -697,5 +1092,49 @@ class HttpShestApi implements ShestBackendAdapter {
       } catch (_) {}
     }
     return msg;
+  }
+
+  @override
+  Future<String> translateText({
+    required String text,
+    required String targetLanguage,
+    String? sourceLanguage,
+  }) async {
+    _checkOnline();
+    if (hasLiveCredentials &&
+        WordverseEnvConfig.envAiTranslateEnabled &&
+        WordverseEnvConfig.isConfiguredRemoteUrl(
+          WordverseEnvConfig.envAiTranslateEndpoint,
+        )) {
+      try {
+        final Uri uri = Uri.parse(WordverseEnvConfig.envAiTranslateEndpoint);
+        final http.Response response = await _http
+            .post(
+              uri,
+              headers: _headers,
+              body: jsonEncode(<String, Object?>{
+                'text': text,
+                'targetLanguage': targetLanguage,
+                'sourceLanguage': sourceLanguage,
+              }),
+            )
+            .timeout(const Duration(seconds: 4));
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final dynamic data = jsonDecode(response.body);
+          if (data is Map && data['translatedText'] != null) {
+            return data['translatedText'].toString();
+          }
+        }
+      } catch (_) {
+        // Fallback resiliente al mock determinista
+      }
+    }
+
+    return fallbackMock.translateText(
+      text: text,
+      targetLanguage: targetLanguage,
+      sourceLanguage: sourceLanguage,
+    );
   }
 }

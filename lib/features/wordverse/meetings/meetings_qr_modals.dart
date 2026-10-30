@@ -16,6 +16,7 @@ class MeetingsAndQrModals {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useRootNavigator: true,
       backgroundColor: const Color(0xFF0E172A),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -41,6 +42,7 @@ class MeetingsAndQrModals {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useRootNavigator: true,
       backgroundColor: const Color(0xFF0E172A),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -162,8 +164,16 @@ class _MeetingsManagerSheetState extends State<_MeetingsManagerSheet> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, color: Colors.white70),
+                  key: const Key('btn_close_meetings_modal'),
+                  tooltip: 'Cerrar',
+                  onPressed: () {
+                    if (Navigator.of(context, rootNavigator: true).canPop()) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    } else if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  icon: const Icon(Icons.close, color: Colors.white, size: 26),
                 ),
               ],
             ),
@@ -425,8 +435,16 @@ class _QrCenterSheetState extends State<_QrCenterSheet> {
                   ),
                 ),
                 IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close, color: Colors.white70),
+                  key: const Key('btn_close_meetings_modal'),
+                  tooltip: 'Cerrar',
+                  onPressed: () {
+                    if (Navigator.of(context, rootNavigator: true).canPop()) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    } else if (Navigator.of(context).canPop()) {
+                      Navigator.of(context).pop();
+                    }
+                  },
+                  icon: const Icon(Icons.close, color: Colors.white, size: 26),
                 ),
               ],
             ),
@@ -524,6 +542,33 @@ class _QrCenterSheetState extends State<_QrCenterSheet> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: const Key('btn_close_qr_modal_bottom'),
+                onPressed: () {
+                  if (Navigator.of(context, rootNavigator: true).canPop()) {
+                    Navigator.of(context, rootNavigator: true).pop();
+                  } else if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.cyanAccent),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                icon: const Icon(Icons.close, size: 18, color: Colors.cyanAccent),
+                label: const Text(
+                  'Cerrar Ventana',
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ),

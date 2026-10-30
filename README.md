@@ -1,49 +1,56 @@
-# WordVerse — Módulo 3D para Shest Labs (Nivel 1+)
+# 🌐 WordVerse — Cliente 3D Inmersivo para Shest Labs
 
-Espacio virtual 3D de reuniones, networking y negocios integrado directamente dentro del ecosistema **Shest Labs**.
+Para la documentación completa de arquitectura, instalación, variables de entorno, APIs, IA, P2P, restricciones regulatorias de Escrow y plan de despliegue, consulta el archivo principal en la raíz:
+👉 [**README.md del Proyecto**](../../README.md)
 
-## Regla de Oro (NO Duplicar Shest)
-WordVerse **NO** posee wallet propia, motor P2P propio ni sistema de pagos independiente. Todo lo financiero (`Auth`, `Wallet USDT TRC20`, `P2P`, `Escrow`, `Pagos`, `QR`) se consume a través de [`ShestApiClient`](lib/core/api_client/shest_api_client.dart).
+---
 
-## Estructura del Proyecto (`/lib`)
+## Estructura Rápida de Directorios (`/lib`)
 
 ```text
 lib/
  ├── main.dart
  ├── core/
- │    ├── models/
- │    │    └── shest_models.dart          # Entidades compartidas (User, Wallet, Escrow, Meeting, P2P)
+ │    ├── api_client/                     # Capa de integración hexagonal (ShestApiClient)
+ │    │    ├── shest_api_client.dart      # Interface única de servicios
+ │    │    ├── http_shest_api.dart        # Implementación REST Spring Boot & PostgREST con JWT 401 refresh
+ │    │    └── mock_shest_api.dart        # Sandbox local determinista en memoria
+ │    ├── config/
+ │    │    └── wordverse_env_config.dart  # Variables de entorno y enmascaramiento de secretos
  │    ├── events/
- │    │    └── wordverse_events.dart      # Bus reactivo con los 16 eventos internos (Fase 32)
- │    ├── api_client/                     # Capa de integración con Shest Labs (Fase 1)
- │    │    ├── shest_api_client.dart      # Punto único de cambio (Mock -> Supabase -> api.shestlabs.com)
- │    │    ├── auth_service.dart          # Sesión, perfil, búsqueda, favoritos y conexiones
- │    │    ├── wallet_service.dart        # Balance USDT TRC20 y pagos validados por Shest
- │    │    ├── p2p_service.dart           # Órdenes P2P de Shest
- │    │    ├── escrow_service.dart        # Creación y estados reales de Escrow (#45821)
- │    │    └── qr_service.dart            # Reuniones (WV-45821) y validación de QR
- │    └── mocks/
- │         └── mock_shest_api.dart        # Simulador completo del backend Java Spring Boot de Shest
+ │    │    └── wordverse_events.dart      # Event bus reactivo tipado (16 eventos)
+ │    ├── models/
+ │    │    └── shest_models.dart          # DTOs y entidades de dominio (User, Wallet, Escrow, P2P)
+ │    ├── services/
+ │    │    └── wordverse_translation_service.dart # Servicio IA multilingüe con rate limit y sanitización PII
+ │    └── theme/
+ │         ├── wordverse_tokens.dart      # Paleta oficial (Obsidiana, Oro, Cian, Púrpura, Verde)
+ │         └── wordverse_theme.dart       # ThemeData corporativo para Flutter
  └── features/
       └── wordverse/
            ├── 3d_room/
-           │    ├── glb_inspector.dart            # Auditoría e inspección binaria del .GLB (Fase 3)
-           │    ├── room_3d_viewport.dart         # Escena 3D interactiva, 7 Hotspots y Avatares
-           │    └── wordverse_module_screen.dart  # HUD principal, cámara, emotes y reconexión
-           ├── avatar/
-           │    └── avatar_node.dart              # Nodo espacial, estado de presencia y emote activo
-           ├── movement/
-           │    └── room_physics_controller.dart  # Spawn, colisiones y proximidad a Hotspots (Fase 6)
-           ├── multiplayer/
-           │    └── multiplayer_service.dart      # Sincronización USER_JOINED_ROOM / AVATAR_MOVED (Fase 7)
-           └── meetings/
-                ├── meetings_qr_modals.dart       # Crear reunión (WV-45821) y Centro QR (Fases 9-11)
-                └── escrow_p2p_modals.dart        # Perfil 3D, Networking, Chat, P2P y Escrow #45821
+           │    ├── hub3d/                # Puente bidireccional Flutter <-> Three.js (postMessage)
+           │    ├── room_3d_viewport.dart # Visor 3D y fallback 2.5D
+           │    └── wordverse_module_screen.dart # Pantalla principal con HUD dorado
+           ├── meetings/
+           │    ├── escrow_sheet.dart     # Centro de arbitraje Escrow B2B
+           │    ├── networking_chat_sheet.dart # Chat bilingüe con traducción IA
+           │    ├── p2p_wallet_sheet.dart # Billetera USDT y mercado P2P
+           │    └── private_suites_screen.dart # Catálogo de salas privadas VIP
+           ├── public_hub/
+           │    └── public_hub_screen.dart # Catálogo de salas públicas
+           └── multiplayer/
+                └── multiplayer_service.dart # Sincronización de presencia multiusuario
 ```
 
-## Checklist de Endpoints Requeridos de Shest Backend (Java Spring Boot)
-1. **Auth & Usuarios**: `GET /v1/users/me`, `GET /v1/users/search`, `POST /v1/networking/connect`, `PATCH /v1/users/status`
-2. **Wallet & Pagos**: `GET /v1/wallet/balance`, `POST /v1/payments/create`
-3. **P2P**: `GET /v1/p2p/orders`, `POST /v1/p2p/orders`, `POST /v1/p2p/orders/{id}/accept`
-4. **Escrow**: `GET /v1/escrows`, `POST /v1/escrows`, `PATCH /v1/escrows/{id}/state`
-5. **Reuniones & QR**: `POST /v1/meetings`, `POST /v1/qr/validate`
+## Verificación de Compilaciones y Pruebas
+```bash
+# Pruebas automatizadas (53/53 passed)
+flutter test
+
+# Análisis estático (0 issues)
+flutter analyze
+
+# Compilación Web para producción
+flutter build web --no-pub
+```

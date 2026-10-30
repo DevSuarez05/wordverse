@@ -1,6 +1,7 @@
 import '../api_client/shest_backend_adapter.dart';
 import '../events/wordverse_events.dart';
 import '../models/shest_models.dart';
+import '../services/wordverse_translation_service.dart';
 
 /// Implementación Mock completa del backend Java Spring Boot de Shest Labs.
 /// Simula las tablas `users`, `wallets`, `meetings` y `escrows` (con el ID #45821
@@ -114,6 +115,11 @@ class MockShestApi implements ShestBackendAdapter {
         rateUsd: 1.001,
         paymentMethod: 'Transferencia Bancaria / Wire',
         status: 'OPEN',
+        type: P2POperationType.sell,
+        minAmountUsdt: 100.0,
+        maxAmountUsdt: 2500.0,
+        reputationScore: 99.8,
+        completedTradesCount: 142,
       ),
       P2POperation(
         id: 'P2P-902',
@@ -123,6 +129,25 @@ class MockShestApi implements ShestBackendAdapter {
         rateUsd: 0.999,
         paymentMethod: 'Liquidación Inmediata Shest',
         status: 'OPEN',
+        type: P2POperationType.buy,
+        minAmountUsdt: 50.0,
+        maxAmountUsdt: 800.0,
+        reputationScore: 99.4,
+        completedTradesCount: 88,
+      ),
+      P2POperation(
+        id: 'P2P-903',
+        makerId: 'usr_4',
+        makerName: 'Elena Rostova (Global Escrow)',
+        amountUsdt: 5000.0,
+        rateUsd: 1.002,
+        paymentMethod: 'Zelle / ACH',
+        status: 'OPEN',
+        type: P2POperationType.sell,
+        minAmountUsdt: 250.0,
+        maxAmountUsdt: 5000.0,
+        reputationScore: 100.0,
+        completedTradesCount: 215,
       ),
     ]);
 
@@ -165,7 +190,21 @@ class MockShestApi implements ShestBackendAdapter {
   @override
   Future<ShestAuthSession> refreshSession(String refreshToken) async {
     _ensureOnline();
-    return loginWithShestSession(userId: 'usr_1');
+    if (refreshToken.isEmpty || !refreshToken.startsWith('refresh_')) {
+      throw const ShestApiException(
+        code: 'INVALID_REFRESH_TOKEN',
+        userMessage: 'Token de refresco inválido o expirado.',
+        statusCode: 401,
+      );
+    }
+    final String userId = refreshToken.replaceFirst('refresh_', '');
+    final ShestUser user = _users[userId] ?? _users.values.first;
+    return ShestAuthSession(
+      accessToken: 'shest_jwt_refreshed_${DateTime.now().millisecondsSinceEpoch}',
+      refreshToken: 'refresh_${user.id}',
+      user: user,
+      expiresAt: DateTime.now().add(const Duration(hours: 8)),
+    );
   }
 
   @override
@@ -328,9 +367,37 @@ class MockShestApi implements ShestBackendAdapter {
   // ===========================================================================
 
   @override
-  Future<List<P2POperation>> listOperations() async {
+  Future<List<P2POperation>> listOperations({
+    P2POperationType? typeFilter,
+    String? paymentMethodFilter,
+    String? query,
+  }) async {
     _ensureOnline();
-    return List<P2POperation>.unmodifiable(_p2pOps);
+    Iterable<P2POperation> filtered = _p2pOps;
+
+    if (typeFilter != null) {
+      filtered = filtered.where((P2POperation o) => o.type == typeFilter);
+    }
+    if (paymentMethodFilter != null &&
+        paymentMethodFilter.isNotEmpty &&
+        paymentMethodFilter != 'ALL') {
+      filtered = filtered.where(
+        (P2POperation o) => o.paymentMethod.toLowerCase().contains(
+          paymentMethodFilter.toLowerCase(),
+        ),
+      );
+    }
+    if (query != null && query.trim().isNotEmpty) {
+      final String q = query.trim().toLowerCase();
+      filtered = filtered.where(
+        (P2POperation o) =>
+            o.makerName.toLowerCase().contains(q) ||
+            o.id.toLowerCase().contains(q) ||
+            o.paymentMethod.toLowerCase().contains(q),
+      );
+    }
+
+    return List<P2POperation>.unmodifiable(filtered);
   }
 
   @override
@@ -339,9 +406,39 @@ class MockShestApi implements ShestBackendAdapter {
     required double amountUsdt,
     required double rateUsd,
     required String paymentMethod,
+    P2POperationType type = P2POperationType.sell,
+    double? minAmountUsdt,
+    double? maxAmountUsdt,
+    String? notes,
   }) async {
     _ensureOnline();
+    if (amountUsdt <= 0) {
+      throw const ShestApiException(
+        code: 'INVALID_AMOUNT',
+        userMessage: 'El monto en USDT debe ser estrictamente mayor a 0.',
+      );
+    }
+    if (rateUsd <= 0) {
+      throw const ShestApiException(
+        code: 'INVALID_RATE',
+        userMessage: 'La tasa USD/USDT debe ser mayor a 0.',
+      );
+    }
+
+    // Validación de saldos en caso de venta (escrow/bloqueo de liquidez)
+    final double makerBalance = _walletBalances[makerId] ?? 0.0;
+    if (type == P2POperationType.sell && makerBalance < amountUsdt) {
+      throw ShestApiException(
+        code: 'INSUFFICIENT_FUNDS',
+        userMessage:
+            'Saldo insuficiente (${makerBalance.toStringAsFixed(2)} USDT) para publicar orden de venta por ${amountUsdt.toStringAsFixed(2)} USDT.',
+      );
+    }
+
     final ShestUser maker = _users[makerId] ?? _users['usr_1']!;
+    final double minLimit = minAmountUsdt ?? (amountUsdt > 50 ? 50.0 : 10.0);
+    final double maxLimit = maxAmountUsdt ?? amountUsdt;
+
     final P2POperation op = P2POperation(
       id: 'P2P-${900 + _p2pOps.length + 1}',
       makerId: maker.id,
@@ -350,8 +447,33 @@ class MockShestApi implements ShestBackendAdapter {
       rateUsd: rateUsd,
       paymentMethod: paymentMethod,
       status: 'OPEN',
+      type: type,
+      minAmountUsdt: minLimit,
+      maxAmountUsdt: maxLimit,
+      reputationScore: 100.0,
+      completedTradesCount: 1,
+      createdAt: DateTime.now(),
+      notes: notes,
     );
+
+    // En venta, reservamos el balance del maker
+    if (type == P2POperationType.sell) {
+      _walletBalances[makerId] = makerBalance - amountUsdt;
+    }
+
     _p2pOps.insert(0, op);
+
+    eventBus.emit(
+      WordverseEventType.p2pOpened,
+      'Nueva orden P2P creada: ${op.id} (${type.label} ${op.amountUsdt} USDT)',
+      <String, Object?>{
+        'operationId': op.id,
+        'makerId': maker.id,
+        'amountUsdt': amountUsdt,
+        'type': type.code,
+      },
+    );
+
     return op;
   }
 
@@ -365,20 +487,70 @@ class MockShestApi implements ShestBackendAdapter {
     if (idx == -1) {
       throw const ShestApiException(
         code: 'P2P_NOT_FOUND',
-        userMessage: 'La operación P2P no existe.',
+        userMessage: 'La operación P2P no existe o fue retirada.',
       );
     }
     final P2POperation current = _p2pOps[idx];
-    final P2POperation updated = P2POperation(
-      id: current.id,
-      makerId: current.makerId,
-      makerName: current.makerName,
-      amountUsdt: current.amountUsdt,
-      rateUsd: current.rateUsd,
-      paymentMethod: current.paymentMethod,
+
+    if (!current.isOpen) {
+      throw ShestApiException(
+        code: 'P2P_NOT_OPEN',
+        userMessage:
+            'La operación ${current.id} ya no está abierta (Estado: ${current.status}).',
+      );
+    }
+
+    // Control financiero de auto-transacción
+    if (current.makerId == takerId) {
+      throw const ShestApiException(
+        code: 'CANNOT_ACCEPT_OWN_ORDER',
+        userMessage:
+            'Integridad Financiera: No puedes tomar tu propia oferta P2P.',
+      );
+    }
+
+    final ShestUser taker = _users[takerId] ?? _users['usr_1']!;
+    final double takerBalance = _walletBalances[takerId] ?? 0.0;
+
+    // Si la orden es de COMPRA para el maker, el taker debe vender y por ende tener fondos
+    if (current.type == P2POperationType.buy && takerBalance < current.amountUsdt) {
+      throw ShestApiException(
+        code: 'INSUFFICIENT_FUNDS',
+        userMessage:
+            'Saldo insuficiente (${takerBalance.toStringAsFixed(2)} USDT) para completar la venta P2P al comprador.',
+      );
+    }
+
+    // Ejecución atómica de saldos
+    if (current.type == P2POperationType.sell) {
+      // Maker ya había aportado; Taker recibe los USDT
+      _walletBalances[takerId] = takerBalance + current.amountUsdt;
+    } else {
+      // Taker vende; Taker descuenta, Maker recibe
+      _walletBalances[takerId] = takerBalance - current.amountUsdt;
+      final double makerBal = _walletBalances[current.makerId] ?? 0.0;
+      _walletBalances[current.makerId] = makerBal + current.amountUsdt;
+    }
+
+    final P2POperation updated = current.copyWith(
       status: 'COMPLETED',
+      takerId: taker.id,
+      takerName: '${taker.name} (${taker.company})',
     );
     _p2pOps[idx] = updated;
+
+    eventBus.emit(
+      WordverseEventType.paymentCompleted,
+      'Operación P2P completada: ${current.id} entre ${current.makerId} y $takerId',
+      <String, Object?>{
+        'operationId': current.id,
+        'makerId': current.makerId,
+        'takerId': takerId,
+        'amountUsdt': current.amountUsdt,
+        'rateUsd': current.rateUsd,
+      },
+    );
+
     return updated;
   }
 
@@ -393,16 +565,26 @@ class MockShestApi implements ShestBackendAdapter {
       );
     }
     final P2POperation current = _p2pOps[idx];
-    final P2POperation updated = P2POperation(
-      id: current.id,
-      makerId: current.makerId,
-      makerName: current.makerName,
-      amountUsdt: current.amountUsdt,
-      rateUsd: current.rateUsd,
-      paymentMethod: current.paymentMethod,
+
+    if (!current.isOpen) {
+      throw ShestApiException(
+        code: 'CANNOT_CANCEL',
+        userMessage:
+            'Solo se pueden cancelar órdenes en estado OPEN (Estado actual: ${current.status}).',
+      );
+    }
+
+    // Si era venta, reembolsamos el balance retenido al maker
+    if (current.type == P2POperationType.sell) {
+      final double currentBal = _walletBalances[current.makerId] ?? 0.0;
+      _walletBalances[current.makerId] = currentBal + current.amountUsdt;
+    }
+
+    final P2POperation updated = current.copyWith(
       status: 'CANCELLED',
     );
     _p2pOps[idx] = updated;
+
     return updated;
   }
 
@@ -487,44 +669,163 @@ class MockShestApi implements ShestBackendAdapter {
 
     final EscrowOperation current = _escrows[index];
 
-    // Validación financiera en el "Cerebro Shest" al fondear (Fase 33)
-    if (targetStatus == EscrowStatus.funded &&
-        current.status == EscrowStatus.pending) {
-      final double creatorBalance = _walletBalances[current.creatorId] ?? 0.0;
-      if (creatorBalance < current.amount) {
-        throw ShestApiException(
-          code: 'ESCROW_INSUFFICIENT_FUNDS',
-          userMessage:
-              'Shest Backend: Saldo USDT insuficiente para fondear el Escrow #${current.id}.',
-        );
-      }
-      _walletBalances[current.creatorId] = creatorBalance - current.amount;
-      _walletTxLogs
-          .putIfAbsent(current.creatorId, () => <String>[])
-          .insert(
-            0,
-            'Fondeo bloqueado en ESCROW #${current.id}: -${current.amount.toStringAsFixed(2)} USDT',
-          );
+    // 1. Idempotencia: si ya está en el estado solicitado, retornar sin repetir efectos
+    if (current.status == targetStatus) {
+      return current;
     }
 
-    // Si se libera o completa, Shest acredita a la contraparte
-    if ((targetStatus == EscrowStatus.released ||
-            targetStatus == EscrowStatus.completed) &&
-        current.status != EscrowStatus.released &&
-        current.status != EscrowStatus.completed) {
-      _walletBalances[current.counterpartyId] =
-          (_walletBalances[current.counterpartyId] ?? 0.0) + current.amount;
-      _walletTxLogs
-          .putIfAbsent(current.counterpartyId, () => <String>[])
-          .insert(
-            0,
-            'Escrow #${current.id} liberado: +${current.amount.toStringAsFixed(2)} USDT',
-          );
+    // 2. Control de estados terminales
+    if (current.isTerminal) {
+      throw ShestApiException(
+        code: 'ESCROW_TERMINAL_STATE',
+        userMessage:
+            'Integridad: El Escrow #${current.id} ya se encuentra en estado terminal (${current.status.displayLabel}).',
+      );
     }
+
+    // 3. Autorización de actores (Fase 5 — WV-500.1 / ESC-D3)
+    final bool isCreator = current.isCreator(actorUserId);
+    final bool isCounterparty = current.counterpartyId == actorUserId;
+    final bool isArbiterOrAdmin = actorUserId.contains('arbiter') ||
+        actorUserId.contains('admin') ||
+        actorUserId == 'system';
+
+    if (!isCreator && !isCounterparty && !isArbiterOrAdmin) {
+      throw ShestApiException(
+        code: 'UNAUTHORIZED_ACTOR',
+        userMessage:
+            'Seguridad: El usuario $actorUserId no está autorizado para modificar el Escrow #${current.id}.',
+      );
+    }
+
+    // 4. Reglas financieras y validación de transiciones de estado
+    switch (targetStatus) {
+      case EscrowStatus.pending:
+        break;
+
+      case EscrowStatus.funded:
+        if (current.status != EscrowStatus.pending) {
+          throw ShestApiException(
+            code: 'INVALID_TRANSITION',
+            userMessage:
+                'Solo se puede fondear un Escrow en estado PENDIENTE (Estado actual: ${current.status.displayLabel}).',
+          );
+        }
+        if (!isCreator && !isArbiterOrAdmin) {
+          throw const ShestApiException(
+            code: 'CREATOR_ONLY_ACTION',
+            userMessage: 'Solo el creador/depositante puede fondear el Escrow.',
+          );
+        }
+        final double creatorBalance = _walletBalances[current.creatorId] ?? 0.0;
+        if (creatorBalance < current.amount) {
+          throw ShestApiException(
+            code: 'ESCROW_INSUFFICIENT_FUNDS',
+            userMessage:
+                'Shest Backend: Saldo USDT insuficiente (${creatorBalance.toStringAsFixed(2)} USDT) para fondear el Escrow #${current.id} (${current.amount.toStringAsFixed(2)} USDT).',
+          );
+        }
+        _walletBalances[current.creatorId] = creatorBalance - current.amount;
+        _walletTxLogs
+            .putIfAbsent(current.creatorId, () => <String>[])
+            .insert(
+              0,
+              'Fondeo bloqueado en custodia ESCROW #${current.id}: -${current.amount.toStringAsFixed(2)} USDT',
+            );
+        break;
+
+      case EscrowStatus.inProgress:
+        if (current.status == EscrowStatus.pending) {
+          throw const ShestApiException(
+            code: 'ESCROW_NOT_FUNDED',
+            userMessage:
+                'Integridad: El Escrow debe ser fondeado antes de iniciar la entrega de servicios.',
+          );
+        }
+        break;
+
+      case EscrowStatus.releaseRequested:
+        if (current.status == EscrowStatus.pending) {
+          throw const ShestApiException(
+            code: 'ESCROW_NOT_FUNDED',
+            userMessage:
+                'Integridad: No se puede solicitar liberación sobre un Escrow no fondeado.',
+          );
+        }
+        break;
+
+      case EscrowStatus.released:
+      case EscrowStatus.completed:
+        // ESC-D1: Prohibir liberación si nunca fue fondeado
+        if (current.status == EscrowStatus.pending) {
+          throw const ShestApiException(
+            code: 'ESCROW_NOT_FUNDED',
+            userMessage:
+                'Integridad Financiera (ESC-D1): No se pueden liberar fondos de un Escrow que no ha sido fondeado.',
+          );
+        }
+        // ESC-D3: Solo el creador o árbitro puede ordenar liberación (la contraparte no puede autoliberarse fondos)
+        if (isCounterparty && !isArbiterOrAdmin && !isCreator) {
+          throw const ShestApiException(
+            code: 'CANNOT_SELF_RELEASE',
+            userMessage:
+                'Control Financiero: La contraparte beneficiaria no puede ordenar la liberación unilateral a su favor.',
+          );
+        }
+        // Acreditar fondos a la contraparte solo si no se había liberado previamente
+        if (current.status != EscrowStatus.released &&
+            current.status != EscrowStatus.completed) {
+          _walletBalances[current.counterpartyId] =
+              (_walletBalances[current.counterpartyId] ?? 0.0) + current.amount;
+          _walletTxLogs
+              .putIfAbsent(current.counterpartyId, () => <String>[])
+              .insert(
+                0,
+                'Custodia Escrow #${current.id} liberada a favor: +${current.amount.toStringAsFixed(2)} USDT',
+              );
+        }
+        break;
+
+      case EscrowStatus.cancelled:
+        // ESC-D2: Si el escrow ya había sido fondeado, reembolsar al creador
+        if (current.status != EscrowStatus.pending) {
+          _walletBalances[current.creatorId] =
+              (_walletBalances[current.creatorId] ?? 0.0) + current.amount;
+          _walletTxLogs
+              .putIfAbsent(current.creatorId, () => <String>[])
+              .insert(
+                0,
+                'Reembolso íntegro por cancelación de ESCROW #${current.id}: +${current.amount.toStringAsFixed(2)} USDT',
+              );
+        }
+        break;
+
+      case EscrowStatus.disputed:
+        if (current.status == EscrowStatus.pending) {
+          throw const ShestApiException(
+            code: 'ESCROW_NOT_FUNDED',
+            userMessage:
+                'No se puede abrir disputa sobre un contrato que aún no tiene fondos depositados.',
+          );
+        }
+        break;
+    }
+
+    final String timeStr = DateTime.now().toIso8601String().substring(11, 19);
+    final ShestUser actor = _users[actorUserId] ??
+        ShestUser(
+          id: actorUserId,
+          name: actorUserId,
+          company: 'Shest Arbitration',
+          role: 'Audit',
+          description: '',
+          avatarInitials: 'SH',
+          avatarHexColor: 0xFFD4AF37,
+        );
 
     final List<String> updatedHistory = List<String>.from(current.historyLog)
       ..add(
-        'Estado actualizado por Shest API → ${targetStatus.apiValue} (${targetStatus.displayLabel})',
+        '[$timeStr] ${actor.name} (${actor.id}): ${current.status.apiValue} ➔ ${targetStatus.apiValue} (${targetStatus.displayLabel})',
       );
 
     final EscrowOperation updated = current.copyWith(
@@ -691,5 +992,23 @@ class MockShestApi implements ShestBackendAdapter {
     );
     _chatMessages.add(msg);
     return msg;
+  }
+
+  final WordverseTranslationService _translationEngine =
+      WordverseTranslationService();
+
+  @override
+  Future<String> translateText({
+    required String text,
+    required String targetLanguage,
+    String? sourceLanguage,
+  }) async {
+    _ensureOnline();
+    final TranslationResult res = await _translationEngine.translate(
+      text: text,
+      targetLanguage: targetLanguage,
+      sourceLanguage: sourceLanguage,
+    );
+    return res.translatedText;
   }
 }

@@ -64,11 +64,23 @@ class WordverseNotificationsSheet extends StatelessWidget {
       case WordverseEventType.paymentRequest:
       case WordverseEventType.paymentCompleted:
         return Icons.account_balance_wallet;
+      case WordverseEventType.translationExecuted:
+        return Icons.translate;
+      case WordverseEventType.roomStateSynced:
+        return Icons.sync;
+      case WordverseEventType.authSessionChanged:
+        return Icons.lock_reset;
+      case WordverseEventType.apiError:
+        return Icons.warning_amber_rounded;
     }
   }
 
   Color _colorForEvent(WordverseEventType type) {
     switch (type) {
+      case WordverseEventType.apiError:
+        return Colors.redAccent;
+      case WordverseEventType.translationExecuted:
+        return Colors.cyanAccent;
       case WordverseEventType.escrowCreated:
       case WordverseEventType.escrowUpdated:
       case WordverseEventType.escrowCompleted:

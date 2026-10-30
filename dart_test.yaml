@@ -1,0 +1,3 @@
+tags:
+  golden:
+    description: "Pruebas de referencia visual (regenerar con --update-goldens)"

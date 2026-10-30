@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>WordVerse Hub 3D</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #050b18; touch-action: none; user-select: none; font-family: "Segoe UI", Arial, sans-serif; }
+    #c { width: 100%; height: 100%; display: block; outline: none; }
+    #top-hud-bar {
+      position: fixed; top: 10px; left: 12px; right: 12px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      z-index: 50; pointer-events: none; flex-wrap: wrap;
+    }
+    .top-hud-group {
+      display: flex; align-items: center; gap: 6px; pointer-events: auto;
+    }
+    #room-switch-bar {
+      display: flex; gap: 5px; pointer-events: auto;
+      background: rgba(10, 10, 12, 0.90); padding: 3px 5px; border-radius: 18px;
+      border: 1px solid rgba(212, 175, 55, 0.55); box-shadow: 0 3px 14px rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(8px);
+    }
+    .room-btn {
+      padding: 4px 12px; border-radius: 14px; color: #d4af37; font-weight: 800; font-size: 11px;
+      letter-spacing: .3px; background: rgba(15, 15, 20, 0.75); border: 1px solid rgba(212, 175, 55, 0.3);
+      cursor: pointer; display: flex; align-items: center; gap: 5px; transition: all .2s ease;
+      white-space: nowrap;
+    }
+    .room-btn:hover {
+      background: rgba(212, 175, 55, 0.22); border-color: #ffd978; color: #ffd978;
+    }
+    .room-btn.active {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.42), rgba(140, 100, 34, 0.38));
+      border-color: #ffd978; color: #fff8e7; box-shadow: 0 0 12px rgba(212, 175, 55, 0.45);
+    }
+    #cam-btn {
+      pointer-events: auto;
+      padding: 5px 11px; border-radius: 15px; color: #ffd978; font-weight: 800; font-size: 11px; letter-spacing: .3px;
+      background: rgba(10, 10, 12, .90); border: 1px solid rgba(212, 175, 55, 0.6); box-shadow: 0 2px 10px rgba(0, 0, 0, .5);
+      cursor: pointer; display: flex; align-items: center; gap: 5px;
+      transition: all .2s ease; backdrop-filter: blur(8px); white-space: nowrap;
+    }
+    #cam-btn:hover {
+      background: rgba(212, 175, 55, .25); border-color: #ffd978; box-shadow: 0 0 14px rgba(212, 175, 55, .5);
+    }
+    #action-btn {
+      display: none !important;
+    }
+    #boardroom-presenter-bar {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 8px; z-index: 60;
+      background: rgba(10, 10, 12, 0.94); padding: 5px 12px; border-radius: 18px;
+      border: 1px solid #d4af37; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.75), 0 0 16px rgba(212, 175, 55, 0.3);
+      backdrop-filter: blur(10px);
+    }
+    .slide-nav-btn {
+      padding: 4px 10px; border-radius: 12px; background: rgba(212, 175, 55, 0.18);
+      border: 1px solid #d4af37; color: #ffd978; font-weight: 800; font-size: 11px;
+      cursor: pointer; transition: all .15s ease; white-space: nowrap;
+    }
+    .slide-nav-btn:hover {
+      background: rgba(212, 175, 55, 0.42); color: #fff;
+    }
+    #slide-title-label {
+      color: #ffd978; font-weight: 800; font-size: 11px; letter-spacing: .4px;
+      white-space: nowrap;
+    }
+    #btn-ai-minutes {
+      padding: 4px 10px; border-radius: 12px;
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.28), rgba(0, 255, 135, 0.18));
+      border: 1px solid #d4af37; color: #ffd978; font-weight: 800; font-size: 11px;
+      cursor: pointer; transition: all .15s ease; display: flex; align-items: center; gap: 4px; white-space: nowrap;
+    }
+    #btn-ai-minutes:hover {
+      background: rgba(212, 175, 55, 0.45); color: #ffffff;
+      box-shadow: 0 0 12px rgba(212, 175, 55, 0.5);
+    }
+    #nexus-ai-btn {
+      padding: 5px 11px; border-radius: 15px; color: #ffd978; font-weight: 800; font-size: 11px; letter-spacing: .3px;
+      background: rgba(10, 10, 12, 0.90); border: 1px solid rgba(212, 175, 55, 0.65);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+      cursor: pointer; display: flex; align-items: center; gap: 6px;
+      transition: all .2s ease; backdrop-filter: blur(8px); white-space: nowrap;
+    }
+    #nexus-ai-btn:hover {
+      background: rgba(212, 175, 55, 0.24); border-color: #ffd978; color: #ffffff;
+      box-shadow: 0 0 14px rgba(212, 175, 55, 0.55);
+    }
+    .ai-pulse-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: #d4af37;
+      box-shadow: 0 0 8px #ffd978; animation: aiPulse 1.6s infinite ease-in-out;
+    }
+    @keyframes aiPulse {
+      0%, 100% { transform: scale(0.9); opacity: 0.75; }
+      50% { transform: scale(1.35); opacity: 1; }
+    }
+    #nexus-ai-panel {
+      position: fixed; top: 62px; left: 16px; width: 410px; max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 96px); overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: #00f0ff rgba(8, 10, 16, 0.8);
+      background: rgba(8, 10, 16, 0.94); border: 1.5px solid #00f0ff;
+      border-radius: 20px; padding: 16px 18px; z-index: 80;
+      box-shadow: 0 12px 42px rgba(0, 0, 0, 0.85), 0 0 28px rgba(0, 240, 255, 0.28);
+      backdrop-filter: blur(14px); color: #f5f7fa; display: none; flex-direction: column; gap: 12px;
+    }
+    #nexus-ai-panel::-webkit-scrollbar, #ai-minutes-content::-webkit-scrollbar { width: 6px; }
+    #nexus-ai-panel::-webkit-scrollbar-track, #ai-minutes-content::-webkit-scrollbar-track { background: rgba(8, 10, 16, 0.8); border-radius: 6px; }
+    #nexus-ai-panel::-webkit-scrollbar-thumb, #ai-minutes-content::-webkit-scrollbar-thumb { background: rgba(0, 240, 255, 0.55); border-radius: 6px; }
+    #nexus-ai-panel.open { display: flex; }
+    .ai-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(212, 175, 55, 0.35); padding-bottom: 10px;
+    }
+    .ai-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+    .ai-title {
+      font-size: 14px; font-weight: 900; color: #00ff87; letter-spacing: .6px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .ai-subtitle { font-size: 11px; color: #ffd978; font-weight: 600; }
+    .ai-header-actions { display: flex; align-items: center; gap: 6px; }
+    .ai-icon-btn {
+      background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(0, 240, 255, 0.4);
+      color: #00f0ff; border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 800;
+      cursor: pointer; transition: all .15s;
+    }
+    .ai-icon-btn:hover { background: rgba(0, 240, 255, 0.25); color: #fff; }
+    .ai-speech-box {
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.10), rgba(123, 44, 191, 0.12));
+      border-left: 3px solid #00ff87; border-radius: 10px; padding: 11px 13px;
+      font-size: 13px; line-height: 1.48; color: #f5f7fa;
+    }
+    .ai-quick-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 7px;
+    }
+    .ai-quick-btn {
+      background: rgba(18, 22, 34, 0.9); border: 1px solid rgba(212, 175, 55, 0.45);
+      color: #ffd978; border-radius: 11px; padding: 8px 10px; font-size: 11.5px; font-weight: 700;
+      cursor: pointer; text-align: left; transition: all .15s ease;
+    }
+    .ai-quick-btn:hover {
+      background: rgba(212, 175, 55, 0.22); border-color: #00f0ff; color: #ffffff;
+      transform: translateY(-1px);
+    }
+    .ai-query-row {
+      display: flex; gap: 6px;
+    }
+    #ai-query-input {
+      flex: 1; background: rgba(5, 7, 12, 0.9); border: 1px solid rgba(0, 240, 255, 0.45);
+      border-radius: 12px; padding: 8px 12px; color: #fff; font-size: 12.5px; outline: none;
+    }
+    #ai-query-input:focus { border-color: #00ff87; box-shadow: 0 0 10px rgba(0, 255, 135, 0.3); }
+    #ai-query-send {
+      background: linear-gradient(135deg, #00ff87, #00f0ff); border: none; color: #050505;
+      font-weight: 900; font-size: 12px; border-radius: 12px; padding: 0 14px; cursor: pointer;
+    }
+    #ai-minutes-box {
+      display: none; flex-direction: column; gap: 8px;
+      background: rgba(5, 8, 14, 0.95); border: 1px solid #d4af37;
+      border-radius: 12px; padding: 12px;
+    }
+    #ai-minutes-box.show { display: flex; }
+    .ai-minutes-header {
+      font-size: 12px; font-weight: 900; color: #ffd978; letter-spacing: .5px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    #ai-minutes-content {
+      font-family: "Consolas", "Courier New", monospace; font-size: 11.5px; line-height: 1.45;
+      color: #d1fae5; white-space: pre-wrap; max-height: 190px; overflow-y: auto;
+      background: rgba(0, 0, 0, 0.45); padding: 9px; border-radius: 8px;
+      border: 1px solid rgba(0, 255, 135, 0.25);
+    }
+    .ai-minutes-lang-bar {
+      display: flex; align-items: center; gap: 6px; margin: 4px 0 6px 0;
+    }
+    .ai-min-lang-btn {
+      padding: 3px 8px; border-radius: 8px; font-size: 10.5px; font-weight: 700;
+      cursor: pointer; border: 1px solid rgba(212, 175, 55, 0.4);
+      background: rgba(15, 23, 42, 0.8); color: #e2e8f0; transition: all .15s ease;
+    }
+    .ai-min-lang-btn:hover {
+      background: rgba(212, 175, 55, 0.25); border-color: #ffd978; color: #fff;
+    }
+    .ai-min-lang-btn.active {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.5), rgba(0, 240, 255, 0.3));
+      border-color: #ffd978; color: #ffffff; box-shadow: 0 0 8px rgba(212, 175, 55, 0.4);
+    }
+    .ai-minutes-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+    .ai-min-action-btn {
+      padding: 6px 12px; border-radius: 10px; font-size: 11.5px; font-weight: 800;
+      cursor: pointer; border: 1px solid #00ff87; background: rgba(0, 255, 135, 0.18); color: #00ff87;
+    }
+    .ai-min-action-btn:hover { background: rgba(0, 255, 135, 0.38); color: #fff; }
+    #kiosk-btn {
+      padding: 5px 11px; border-radius: 15px; color: #ffd978; font-weight: 800; font-size: 11px; letter-spacing: .3px;
+      background: rgba(10, 10, 12, 0.90); border: 1px solid rgba(212, 175, 55, 0.65);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+      cursor: pointer; display: flex; align-items: center; gap: 5px;
+      transition: all .2s ease; backdrop-filter: blur(8px); white-space: nowrap;
+    }
+    #kiosk-btn:hover {
+      background: rgba(212, 175, 55, 0.24); border-color: #ffd978; color: #ffffff;
+    }
+    #kiosk-panel {
+      position: fixed; top: 62px; right: 16px; width: 400px; max-width: calc(100vw - 32px);
+      background: rgba(8, 10, 16, 0.95); border: 1.5px solid #d4af37;
+      border-radius: 20px; padding: 16px 18px; z-index: 80;
+      box-shadow: 0 12px 42px rgba(0, 0, 0, 0.85), 0 0 28px rgba(212, 175, 55, 0.28);
+      backdrop-filter: blur(14px); color: #f5f7fa; display: none; flex-direction: column; gap: 12px;
+    }
+    #kiosk-panel.open { display: flex; }
+    .kiosk-tabs {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+    }
+    .kiosk-tab-btn {
+      background: rgba(18, 22, 34, 0.9); border: 1px solid rgba(212, 175, 55, 0.35);
+      color: #a1a6b0; border-radius: 10px; padding: 7px 6px; font-size: 11px; font-weight: 800;
+      cursor: pointer; transition: all .15s; text-align: center;
+    }
+    .kiosk-tab-btn.active {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.32), rgba(0, 240, 255, 0.2));
+      border-color: #00f0ff; color: #ffffff; box-shadow: 0 0 12px rgba(0, 240, 255, 0.35);
+    }
+    .kiosk-product-card {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.10), rgba(0, 240, 255, 0.08));
+      border: 1px solid rgba(212, 175, 55, 0.45); border-radius: 14px; padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .kiosk-prod-name { font-size: 14px; font-weight: 900; color: #ffd978; }
+    .kiosk-prod-price { font-size: 18px; font-weight: 900; color: #00ff87; }
+    .kiosk-prod-desc { font-size: 12px; color: #d1d5db; line-height: 1.42; }
+    .kiosk-prod-meta { font-size: 11px; color: #00f0ff; font-weight: 700; }
+    .kiosk-actions { display: flex; gap: 8px; }
+    .kiosk-buy-btn {
+      flex: 1.3; padding: 10px 12px; border-radius: 12px; border: 1.5px solid #00ff87;
+      background: linear-gradient(135deg, rgba(0, 255, 135, 0.28), rgba(0, 240, 255, 0.25));
+      color: #ffffff; font-weight: 900; font-size: 12.5px; cursor: pointer; transition: all .15s;
+    }
+    .kiosk-buy-btn:hover {
+      background: linear-gradient(135deg, #00ff87, #00f0ff); color: #050505;
+      box-shadow: 0 0 18px rgba(0, 255, 135, 0.65);
+    }
+    .kiosk-vendor-btn {
+      flex: 1; padding: 10px 10px; border-radius: 12px; border: 1px solid #d4af37;
+      background: rgba(212, 175, 55, 0.16); color: #ffd978; font-weight: 800; font-size: 12px;
+      cursor: pointer; transition: all .15s;
+    }
+    .kiosk-vendor-btn:hover { background: rgba(212, 175, 55, 0.35); color: #fff; }
+    #kiosk-receipt-box {
+      display: none; background: rgba(0, 255, 135, 0.10); border: 1px solid #00ff87;
+      border-radius: 10px; padding: 9px 11px; font-size: 11.5px; color: #d1fae5; line-height: 1.4;
+    }
+    #kiosk-receipt-box.show { display: block; }
+    /* Credencial Holográfica Ejecutiva 3D (Holo-Card) */
+    #holo-card-panel {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 420px; max-width: calc(100vw - 32px);
+      background: rgba(10, 12, 18, 0.96); border: 1.5px solid #d4af37;
+      border-radius: 20px; padding: 20px; z-index: 85;
+      box-shadow: 0 16px 50px rgba(0, 0, 0, 0.9), 0 0 32px rgba(212, 175, 55, 0.35);
+      backdrop-filter: blur(16px); color: #f5f7fa; display: none; flex-direction: column; gap: 14px;
+    }
+    #holo-card-panel.open { display: flex; animation: holoPop .25s ease-out; }
+    @keyframes holoPop {
+      0% { opacity: 0; transform: translate(-50%, -46%) scale(0.95); }
+      100% { opacity: 1; transform: translate(-50%, -50%) scale(1.0); }
+    }
+    .holo-header {
+      display: flex; align-items: center; gap: 14px; border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+      padding-bottom: 12px;
+    }
+    .holo-avatar-badge {
+      width: 50px; height: 50px; border-radius: 50%;
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border: 2px solid #d4af37; box-shadow: 0 0 12px rgba(212, 175, 55, 0.4);
+      display: flex; align-items: center; justify-content: center; font-size: 24px;
+    }
+    .holo-user-info { flex: 1; min-width: 0; }
+    .holo-user-name { font-size: 16px; font-weight: 900; color: #ffffff; display: flex; align-items: center; gap: 6px; }
+    .holo-user-title { font-size: 12px; color: #ffd978; font-weight: 700; margin-top: 2px; }
+    .holo-user-status { font-size: 11px; color: #00ff87; display: flex; align-items: center; gap: 5px; margin-top: 2px; }
+    .holo-status-dot { width: 7px; height: 7px; border-radius: 50%; background: #00ff87; box-shadow: 0 0 6px #00ff87; }
+    .holo-metrics-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .holo-metric-card {
+      background: rgba(18, 22, 34, 0.85); border: 1px solid rgba(212, 175, 55, 0.25);
+      border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;
+    }
+    .holo-metric-label { font-size: 10px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; }
+    .holo-metric-val { font-size: 12px; color: #38bdf8; font-weight: 800; }
+    .holo-actions-row {
+      display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap;
+    }
+    .holo-action-btn {
+      flex: 1; min-width: 105px; padding: 9px 10px; border-radius: 12px; font-weight: 800; font-size: 11.5px;
+      cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; transition: all .15s;
+    }
+    .holo-action-chat {
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.25), rgba(56, 189, 248, 0.2));
+      border: 1.5px solid #00f0ff; color: #ffffff;
+    }
+    .holo-action-chat:hover { background: #00f0ff; color: #050b18; box-shadow: 0 0 16px rgba(0, 240, 255, 0.5); }
+    .holo-action-wave {
+      background: rgba(212, 175, 55, 0.18); border: 1.5px solid #d4af37; color: #ffd978;
+    }
+    .holo-action-wave:hover { background: #d4af37; color: #0a0a0c; box-shadow: 0 0 16px rgba(212, 175, 55, 0.5); }
+    .holo-action-escrow {
+      background: rgba(0, 255, 135, 0.18); border: 1.5px solid #00ff87; color: #00ff87;
+    }
+    .holo-action-escrow:hover { background: #00ff87; color: #050505; box-shadow: 0 0 16px rgba(0, 255, 135, 0.5); }
+    #affinity-radar-pill {
+      display: none !important;
+    }
+    .radar-match-badge {
+      background: rgba(0, 255, 135, 0.2); border: 1px solid #00ff87; color: #00ff87;
+      padding: 2px 8px; border-radius: 12px; font-weight: 900; font-size: 11px;
+    }
+    #btn-radar-connect {
+      background: rgba(212, 175, 55, 0.22); border: 1px solid #d4af37; color: #ffd978;
+      border-radius: 12px; padding: 4px 10px; font-size: 11px; font-weight: 800; cursor: pointer;
+    }
+    #btn-radar-connect:hover { background: #d4af37; color: #050505; }
+    #hud-wallet-pill {
+      display: flex; align-items: center; gap: 5px; pointer-events: auto;
+      background: rgba(10, 14, 20, 0.90); padding: 5px 12px; border-radius: 15px;
+      border: 1px solid rgba(0, 255, 135, 0.55); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+      color: #00ff87; font-size: 11px; font-weight: 800; letter-spacing: .3px;
+      cursor: pointer; transition: all .2s ease; backdrop-filter: blur(8px); white-space: nowrap;
+    }
+    #hud-wallet-pill:hover {
+      background: rgba(0, 255, 135, 0.22); border-color: #00ff87; color: #ffffff;
+      box-shadow: 0 0 14px rgba(0, 255, 135, 0.4);
+    }
+    #hud-wallet-pill.flash-gain {
+      animation: walletFlash .6s ease-out;
+    }
+    @keyframes walletFlash {
+      0% { transform: scale(1.0); }
+      50% { transform: scale(1.08); box-shadow: 0 0 22px #00ff87; }
+      100% { transform: scale(1.0); }
+    }
+    #btn-fast-travel {
+      padding: 5px 11px; border-radius: 15px; color: #00f0ff; font-weight: 800; font-size: 11px; letter-spacing: .3px;
+      background: rgba(10, 10, 12, 0.90); border: 1px solid rgba(0, 240, 255, 0.55);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5); cursor: pointer; display: flex; align-items: center; gap: 6px;
+      transition: all .2s ease; backdrop-filter: blur(8px); white-space: nowrap; pointer-events: auto;
+    }
+    #btn-fast-travel:hover {
+      background: rgba(0, 240, 255, 0.22); border-color: #00f0ff; color: #ffffff;
+      box-shadow: 0 0 14px rgba(0, 240, 255, 0.55); transform: translateY(-1px);
+    }
+    #teleport-overlay {
+      position: fixed; inset: 0; pointer-events: none; opacity: 0; z-index: 999;
+      background: radial-gradient(circle at center, rgba(0, 240, 255, 0.5) 0%, rgba(212, 175, 55, 0.35) 45%, rgba(5, 11, 24, 0.96) 100%);
+      transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    #teleport-overlay.active {
+      opacity: 1;
+    }
+    #teleport-panel {
+      position: fixed; top: 62px; left: 50%; transform: translateX(-50%); width: 440px; max-width: calc(100vw - 32px);
+      background: rgba(8, 11, 18, 0.96); border: 1.5px solid #00f0ff;
+      border-radius: 20px; padding: 16px 18px; z-index: 85;
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.88), 0 0 30px rgba(0, 240, 255, 0.3);
+      backdrop-filter: blur(16px); color: #f5f7fa; display: none; flex-direction: column; gap: 12px;
+    }
+    #teleport-panel.open { display: flex; animation: toastSlideIn .25s ease-out; }
+    .teleport-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(0, 240, 255, 0.3); padding-bottom: 10px;
+    }
+    .teleport-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+    .teleport-title {
+      font-size: 13.5px; font-weight: 900; color: #00f0ff; letter-spacing: .5px;
+      display: flex; align-items: center; gap: 7px;
+    }
+    .teleport-subtitle { font-size: 11px; color: #ffd978; font-weight: 600; }
+    .teleport-grid {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .teleport-dest-btn {
+      display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 12px;
+      background: rgba(14, 18, 28, 0.85); border: 1px solid rgba(212, 175, 55, 0.35);
+      cursor: pointer; transition: all .16s ease; text-align: left;
+    }
+    .teleport-dest-btn:hover {
+      background: rgba(0, 240, 255, 0.18); border-color: #00f0ff; transform: translateX(3px);
+      box-shadow: 0 0 14px rgba(0, 240, 255, 0.35);
+    }
+    .tp-icon { font-size: 20px; }
+    .tp-info { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+    .tp-name { font-size: 12.5px; font-weight: 800; color: #ffd978; }
+    .tp-desc { font-size: 10.5px; color: #94a3b8; }
+    .tp-tag {
+      font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 8px;
+      background: rgba(0, 240, 255, 0.15); color: #00f0ff; border: 1px solid rgba(0, 240, 255, 0.3);
+    }
+    .kiosk-qr-btn {
+      flex: 1; padding: 10px 10px; border-radius: 12px; border: 1px solid #00f0ff;
+      background: rgba(0, 240, 255, 0.16); color: #00f0ff; font-weight: 800; font-size: 11.5px;
+      cursor: pointer; transition: all .15s; white-space: nowrap;
+    }
+    .kiosk-qr-btn:hover { background: rgba(0, 240, 255, 0.35); color: #fff; }
+    .kiosk-qr-box {
+      background: rgba(12, 16, 26, 0.95); border: 1px solid rgba(0, 240, 255, 0.4);
+      border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .kiosk-qr-header {
+      display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;
+      font-weight: 800; color: #00f0ff;
+    }
+    .kiosk-qr-body { display: flex; gap: 12px; align-items: center; }
+    #kiosk-qr-canvas {
+      width: 110px; height: 110px; border-radius: 8px; border: 1.5px solid #d4af37;
+      background: #050b18; box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+    }
+    .kiosk-qr-details { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .kiosk-qr-address {
+      font-family: monospace; font-size: 11px; color: #ffd978; background: rgba(0,0,0,0.4);
+      padding: 4px 6px; border-radius: 6px; word-break: break-all;
+    }
+    .kiosk-mini-btn {
+      padding: 6px 9px; border-radius: 8px; font-size: 11px; font-weight: 700;
+      border: 1px solid rgba(212, 175, 55, 0.4); background: rgba(212, 175, 55, 0.18);
+      color: #ffd978; cursor: pointer; transition: all .15s;
+    }
+    .kiosk-mini-btn:hover { background: #d4af37; color: #050505; }
+    #holo-toast-container {
+      position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column;
+      gap: 10px; z-index: 100; pointer-events: none; max-width: 380px;
+    }
+    .holo-toast {
+      background: rgba(10, 14, 22, 0.94); border: 1.5px solid #d4af37; border-radius: 14px;
+      padding: 12px 14px; box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(212, 175, 55, 0.3);
+      backdrop-filter: blur(12px); color: #f5f7fa; pointer-events: auto; display: flex;
+      gap: 10px; align-items: flex-start; animation: toastSlideIn .3s ease-out;
+    }
+    @keyframes toastSlideIn {
+      0% { opacity: 0; transform: translateY(16px) scale(0.95); }
+      100% { opacity: 1; transform: translateY(0) scale(1.0); }
+    }
+    .holo-toast-icon { font-size: 20px; line-height: 1; }
+    .holo-toast-content { flex: 1; min-width: 0; }
+    .holo-toast-title { font-size: 12px; font-weight: 800; color: #ffd978; }
+    .holo-toast-msg { font-size: 11px; color: #cbd5e1; line-height: 1.38; margin-top: 2px; }
+    #perf-badge {
+      display: none !important;
+    }
+    #prompt {
+      position: fixed; left: 50%; bottom: 56px; transform: translate(-50%, 10px); opacity: 0;
+      padding: 6px 16px; border-radius: 16px; color: #ffd978; font-weight: 800; font-size: 12px; letter-spacing: .3px;
+      background: linear-gradient(135deg, rgba(10, 10, 12, 0.94), rgba(28, 22, 10, 0.94));
+      border: 1.5px solid #d4af37; box-shadow: 0 4px 18px rgba(0, 0, 0, .75), 0 0 14px rgba(212, 175, 55, .38);
+      transition: opacity .18s, transform .18s, background .15s; pointer-events: auto; cursor: pointer; white-space: nowrap;
+      backdrop-filter: blur(8px); z-index: 65;
+    }
+    #prompt:hover {
+      background: linear-gradient(135deg, rgba(212, 175, 55, 0.32), rgba(28, 22, 10, 0.96));
+      color: #ffffff; border-color: #ffd978;
+    }
+    #prompt.show { opacity: 1; transform: translate(-50%, 0); }
+    body.in-flutter-frame #top-hud-bar { top: 68px; }
+    body.in-flutter-frame #room-switch-bar { display: none !important; }
+    body.in-flutter-frame #nexus-ai-panel,
+    body.in-flutter-frame #teleport-panel,
+    body.in-flutter-frame #kiosk-panel { top: 112px; max-height: calc(100vh - 156px); }
+    body.in-flutter-frame #boardroom-presenter-bar { bottom: 48px; }
+    body.in-flutter-frame #prompt { bottom: 92px; }
+    #help {
+      display: none;
+    }
+    #loading {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      color: #67e8f9; font-weight: 800; letter-spacing: 2px; background: #050b18;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three/addons/": "./vendor/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="c" tabindex="0"></canvas>
+  <div id="top-hud-bar">
+    <div class="top-hud-group">
+      <button id="nexus-ai-btn" title="Abrir Copiloto Holográfico Nexus AI (Tecla N)">
+        <span class="ai-pulse-dot"></span>
+        <span>🤖 NEXUS AI · [N]</span>
+      </button>
+      <button id="kiosk-btn" title="Abrir Vitrina Comercial 3D & Escrow USDT (Tecla K)">
+        <span>🛍️ Kiosco · [K]</span>
+      </button>
+      <button id="btn-fast-travel" title="Teletransportación Cuántica Inmediata entre Zonas (Tecla T)">
+        <span>⚡ Teleport · [T]</span>
+      </button>
+      <div id="hud-wallet-pill" title="Balance USDT TRC20 en Vivo · Clic para abrir Billetera">
+        <span>💰 <strong id="hud-wallet-amount">5,420 USDT</strong></span>
+      </div>
+    </div>
+    <div id="room-switch-bar">
+      <button id="btn-room-public" class="room-btn active" title="Ir a la Plaza Pública (The Hub)">🏛️ Sala Pública</button>
+      <button id="btn-room-private" class="room-btn" title="Ir a la Sala Privada (The Boardroom)">🔒 Sala Privada VIP</button>
+    </div>
+    <div class="top-hud-group">
+      <div id="cam-btn" title="Alternar Modo de Cámara (V o C)">📷 CAM: OTS · [V]</div>
+    </div>
+  </div>
+  <button id="action-btn" class="hud-action-btn">🪑 Sentarse</button>
+  <div id="boardroom-presenter-bar" style="display: none;">
+    <button id="btn-slide-prev" class="slide-nav-btn">◀ Anterior</button>
+    <span id="slide-title-label">📊 Slide 1/4: MAPA TÁCTICO GLOBAL</span>
+    <button id="btn-slide-next" class="slide-nav-btn">Siguiente ▶</button>
+    <button id="btn-ai-minutes" title="Generar Minuta Ejecutiva con IA">📝 Minuta IA</button>
+  </div>
+  <div id="nexus-ai-panel">
+    <div class="ai-header">
+      <div class="ai-title-wrap">
+        <div class="ai-title"><span class="ai-pulse-dot"></span> NEXUS AI · COPILOTO HOLOGRÁFICO</div>
+        <div class="ai-subtitle">Conserje Ejecutivo 24/7 &amp; Síntesis de Juntas E2EE</div>
+      </div>
+      <div class="ai-header-actions">
+        <button id="btn-ai-mute" class="ai-icon-btn" title="Activar/Silenciar Voz Neural">🔊 Voz IA</button>
+        <button id="btn-ai-close" class="ai-icon-btn" title="Cerrar panel">✕</button>
+      </div>
+    </div>
+    <div id="ai-response-text" class="ai-speech-box">
+      Bienvenido a WordVerse Nexus. Soy NEXUS AI, tu conserje ejecutivo holográfico. ¿En qué puedo asistirte hoy?
+    </div>
+    <div class="ai-quick-grid">
+      <button class="ai-quick-btn" data-ai-action="agenda">🏛️ Eventos Hoy en Hub</button>
+      <button class="ai-quick-btn" data-ai-action="elevator">🛗 Ir al Ascensor VIP</button>
+      <button class="ai-quick-btn" data-ai-action="boardroom">🔒 Ir a The Boardroom</button>
+      <button class="ai-quick-btn" data-ai-action="escrow">🛡️ Auditoría Escrow P2P</button>
+      <button class="ai-quick-btn" data-ai-action="mezzanine">🥂 Guía del Mezzanine</button>
+      <button class="ai-quick-btn" data-ai-action="minutes">📝 Generar Minuta IA</button>
+    </div>
+    <form id="ai-query-form" class="ai-query-row">
+      <input id="ai-query-input" type="text" placeholder="Pregúntale a Nexus AI (ej. ¿dónde está el ascensor?)..." autocomplete="off" />
+      <button id="ai-query-send" type="submit">Enviar</button>
+    </form>
+    <div id="ai-minutes-box">
+      <div class="ai-minutes-header">
+        <span>📄 MINUTA EJECUTIVA E2EE — BOARDROOM VIP</span>
+        <span style="color:#00ff87;font-size:10.5px;">● AUDITADA</span>
+      </div>
+      <div class="ai-minutes-lang-bar">
+        <span style="color:#ffd978;font-size:11px;font-weight:700;">🌐 Idioma Minuta:</span>
+        <button id="btn-min-lang-es" class="ai-min-lang-btn active" type="button">🇪🇸 ES</button>
+        <button id="btn-min-lang-en" class="ai-min-lang-btn" type="button">🇺🇸 EN</button>
+        <button id="btn-min-lang-dual" class="ai-min-lang-btn" type="button">🌐 Dual (ES+EN)</button>
+      </div>
+      <div id="ai-minutes-content"></div>
+      <div class="ai-minutes-actions">
+        <button id="btn-copy-minutes" class="ai-min-action-btn" type="button">📋 Copiar</button>
+        <button id="btn-download-minutes" class="ai-min-action-btn" type="button">📥 Descargar (.MD)</button>
+      </div>
+    </div>
+  </div>
+  <div id="kiosk-panel">
+    <div class="ai-header">
+      <div class="ai-title-wrap">
+        <div class="ai-title" style="color:#ffd978;">🛍️ KIOSCO COMERCIAL 3D · ESCROW P2P</div>
+        <div class="ai-subtitle" style="color:#00f0ff;">Vitrina Holográfica Interactiva &amp; Liquidación TRC20</div>
+      </div>
+      <div class="ai-header-actions">
+        <button id="btn-kiosk-close" class="ai-icon-btn" title="Cerrar Kiosco">✕</button>
+      </div>
+    </div>
+    <div class="kiosk-tabs">
+      <button class="kiosk-tab-btn active" data-kiosk-idx="0">💎 Nodo PREMION</button>
+      <button class="kiosk-tab-btn" data-kiosk-idx="1">🛡️ Bóveda E2EE</button>
+      <button class="kiosk-tab-btn" data-kiosk-idx="2">🏛️ Suite VIP</button>
+    </div>
+    <div class="kiosk-product-card">
+      <div id="kiosk-prod-name" class="kiosk-prod-name">💎 Nodo Validador Institucional PREMION</div>
+      <div id="kiosk-prod-price" class="kiosk-prod-price">2,500 USDT · Escrow TRC20</div>
+      <div id="kiosk-prod-desc" class="kiosk-prod-desc">Licencia anual de nodo validador con participación directa en el pool de liquidez P2P de WordVerse y rendimiento estimado del 18.4% APY.</div>
+      <div id="kiosk-prod-meta" class="kiosk-prod-meta">Sponsor Verificado: Andes Capital · Custodia Multi-Firma 3/5</div>
+    </div>
+    <div class="kiosk-actions">
+      <button id="btn-kiosk-buy" class="kiosk-buy-btn" type="button">⚡ Comprar con Escrow USDT</button>
+      <button id="btn-kiosk-qr" class="kiosk-qr-btn" type="button">📱 Pagar con QR TRC20</button>
+      <button id="btn-kiosk-vendor" class="kiosk-vendor-btn" type="button">💬 Contactar Vendedor</button>
+    </div>
+    <div id="kiosk-qr-box" class="kiosk-qr-box" style="display: none;">
+      <div class="kiosk-qr-header">
+        <span>📲 Código QR de Pago · Tron TRC20</span>
+        <button id="btn-close-qr-box" class="ai-icon-btn" style="font-size:11px;">✕</button>
+      </div>
+      <div class="kiosk-qr-body">
+        <canvas id="kiosk-qr-canvas" width="110" height="110"></canvas>
+        <div class="kiosk-qr-details">
+          <div style="font-size:11px;color:#a1a6b0;">Dirección de Bóveda Escrow:</div>
+          <div id="kiosk-trc20-addr" class="kiosk-qr-address">TK7gWordverseVault9x1a</div>
+          <div style="display:flex;gap:6px;margin-top:6px;">
+            <button id="btn-copy-trc20" class="kiosk-mini-btn" type="button">📋 Copiar URI</button>
+            <button id="btn-kiosk-qr-confirm" class="kiosk-mini-btn" type="button" style="background:#00ff87;color:#050505;font-weight:900;">✅ Confirmar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="kiosk-receipt-box"></div>
+  </div>
+  <div id="holo-card-panel">
+    <div class="holo-header">
+      <div id="holo-card-badge" class="holo-avatar-badge">👔</div>
+      <div class="holo-user-info">
+        <div id="holo-card-name" class="holo-user-name">Ejecutivo WordVerse <span style="font-size:12px">🛡️</span></div>
+        <div id="holo-card-title" class="holo-user-title">Senior Corporate Partner · Shest Labs</div>
+        <div id="holo-card-status" class="holo-user-status"><span class="holo-status-dot"></span> <span id="holo-card-status-text">En línea en The Hub (Plaza Central)</span></div>
+      </div>
+      <button id="btn-holo-close" class="ai-icon-btn" title="Cerrar credencial">✕</button>
+    </div>
+    <div class="holo-metrics-grid">
+      <div class="holo-metric-card">
+        <span class="holo-metric-label">Verificación E2EE</span>
+        <span id="holo-metric-verif" class="holo-metric-val">🛡️ Grado Institucional</span>
+      </div>
+      <div class="holo-metric-card">
+        <span class="holo-metric-label">Reputación P2P</span>
+        <span id="holo-metric-rep" class="holo-metric-val">⭐ 99.8% (48 trades)</span>
+      </div>
+      <div class="holo-metric-card">
+        <span class="holo-metric-label">Billetera USDT TRC20</span>
+        <span id="holo-metric-wallet" class="holo-metric-val" style="font-family:monospace;font-size:11px">TK7g...8x9A</span>
+      </div>
+      <div class="holo-metric-card">
+        <span class="holo-metric-label">Idiomas / Voz</span>
+        <span id="holo-metric-lang" class="holo-metric-val">🌐 ES · EN · PT (IA Live)</span>
+      </div>
+    </div>
+    <div class="holo-actions-row">
+      <button id="btn-holo-chat" class="holo-action-btn holo-action-chat">💬 Chat Directo</button>
+      <button id="btn-holo-wave" class="holo-action-btn holo-action-wave">🤝 Saludo VIP</button>
+      <button id="btn-holo-escrow" class="holo-action-btn holo-action-escrow">💼 Escrow B2B</button>
+    </div>
+  </div>
+  <div id="teleport-overlay"></div>
+  <div id="teleport-panel">
+    <div class="teleport-header">
+      <div class="teleport-title-wrap">
+        <div class="teleport-title">⚡ TELETRANSPORTACIÓN CUÁNTICA</div>
+        <div class="teleport-subtitle">Tránsito Instantáneo entre Zonas VIP &amp; Atrio</div>
+      </div>
+      <button id="btn-teleport-close" class="ai-icon-btn" title="Cerrar panel (Esc)">✕</button>
+    </div>
+    <div class="teleport-grid">
+      <div class="teleport-dest-btn" data-zone="atrium">
+        <span class="tp-icon">🏛️</span>
+        <div class="tp-info">
+          <span class="tp-name">Atrio Central</span>
+          <span class="tp-desc">Planta Baja · Red Global &amp; Hotspots</span>
+        </div>
+        <span class="tp-tag">PB</span>
+      </div>
+      <div class="teleport-dest-btn" data-zone="shest">
+        <span class="tp-icon">☕</span>
+        <div class="tp-info">
+          <span class="tp-name">Shest Coffee Bar</span>
+          <span class="tp-desc">Planta Baja · Lounge de Degustación</span>
+        </div>
+        <span class="tp-tag">PB</span>
+      </div>
+      <div class="teleport-dest-btn" data-zone="mezzanine">
+        <span class="tp-icon">🛋️</span>
+        <div class="tp-info">
+          <span class="tp-name">Mezzanine VIP Lounge</span>
+          <span class="tp-desc">Planta Alta · Mirador Panorámico 4.2m</span>
+        </div>
+        <span class="tp-tag" style="color:#ffd978;border-color:rgba(212,175,55,0.4);">PA</span>
+      </div>
+      <div class="teleport-dest-btn" data-zone="boardroom">
+        <span class="tp-icon">💼</span>
+        <div class="tp-info">
+          <span class="tp-name">The Boardroom VIP</span>
+          <span class="tp-desc">Suite Privada · Conferencia E2EE &amp; Slides</span>
+        </div>
+        <span class="tp-tag" style="color:#00ff87;border-color:rgba(0,255,135,0.4);">VIP</span>
+      </div>
+      <div class="teleport-dest-btn" data-zone="elevator">
+        <span class="tp-icon">🏢</span>
+        <div class="tp-info">
+          <span class="tp-name">Ascensor Panorámico</span>
+          <span class="tp-desc">Flanco Oeste · Cabina de Cristal</span>
+        </div>
+        <span class="tp-tag">PB</span>
+      </div>
+    </div>
+  </div>
+  <div id="affinity-radar-pill">
+    <span>📡 Radar:</span>
+    <span id="radar-exec-name" style="color:#00f0ff;">Elena Rostova</span>
+    <span id="radar-exec-match" class="radar-match-badge">96% Afinidad</span>
+    <span id="radar-exec-topic" style="color:#a1a6b0;font-size:11px;">Liquidez P2P &amp; Escrow TRC20</span>
+    <button id="btn-radar-connect" type="button">🤝 Conectar</button>
+  </div>
+  <div id="perf-badge">⚡ 60 FPS · Smart LOD Activo</div>
+  <div id="holo-toast-container"></div>
+  <div id="prompt"></div>
+  <div id="help">WASD / flechas: mover · Shift: correr · Arrastra: girar cámara · Rueda: zoom · E: interactuar · V: cámara</div>
+  <div id="loading">CARGANDO WORDVERSE HUB…</div>
+  <script type="module" src="./src/main.js?v=20261029_v6"></script>
+</body>
+</html>

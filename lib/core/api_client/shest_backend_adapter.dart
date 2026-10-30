@@ -26,4 +26,11 @@ abstract class ShestBackendAdapter
     required String channelId,
     required String text,
   });
+
+  /// Traduce un texto mediante el endpoint de IA de Shest Labs o fallback determinista (Fase 3 — WV-303).
+  Future<String> translateText({
+    required String text,
+    required String targetLanguage,
+    String? sourceLanguage,
+  });
 }

@@ -209,8 +209,16 @@ class _WordverseShestCafeSheetState extends State<WordverseShestCafeSheet> {
                       ),
                     ),
                   IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white70),
+                    key: const Key('btn_close_cafe_sheet'),
+                    tooltip: 'Cerrar',
+                    onPressed: () {
+                      if (Navigator.of(context, rootNavigator: true).canPop()) {
+                        Navigator.of(context, rootNavigator: true).pop();
+                      } else if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+                    icon: const Icon(Icons.close, color: Colors.white, size: 26),
                   ),
                 ],
               ),

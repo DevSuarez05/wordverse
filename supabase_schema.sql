@@ -103,6 +103,8 @@ create table if not exists public.chat_messages (
 -- =============================================================================
 -- POLÍTICAS RLS PARA PRUEBAS DE DESARROLLO (Dev 1 + Dev 2 con ANON_KEY)
 -- =============================================================================
+-- 6. POLÍTICAS ROW LEVEL SECURITY (RLS)
+-- =============================================================================
 alter table public.users enable row level security;
 alter table public.wallets enable row level security;
 alter table public.meetings enable row level security;
@@ -111,6 +113,9 @@ alter table public.room_presence enable row level security;
 alter table public.p2p_operations enable row level security;
 alter table public.chat_messages enable row level security;
 
+-- -----------------------------------------------------------------------------
+-- MODO A: DESARROLLO / STAGING (Permite acceso con SUPABASE_ANON_KEY)
+-- -----------------------------------------------------------------------------
 drop policy if exists "Allow anon all users" on public.users;
 create policy "Allow anon all users" on public.users for all using (true) with check (true);
 
@@ -131,6 +136,41 @@ create policy "Allow anon all p2p_operations" on public.p2p_operations for all u
 
 drop policy if exists "Allow anon all chat_messages" on public.chat_messages;
 create policy "Allow anon all chat_messages" on public.chat_messages for all using (true) with check (true);
+
+-- -----------------------------------------------------------------------------
+-- MODO B: PRODUCCIÓN ESTRICTA (Activar al pasar a producción con Supabase Auth)
+-- Para activar, descomentar este bloque y descartar las políticas "anon":
+-- -----------------------------------------------------------------------------
+-- -- 1. Usuarios: lectura pública de perfiles, actualización solo por el propietario
+-- drop policy if exists "Users viewable by authenticated" on public.users;
+-- create policy "Users viewable by authenticated" on public.users for select to authenticated using (true);
+-- drop policy if exists "Users editable by owner" on public.users;
+-- create policy "Users editable by owner" on public.users for update to authenticated using (auth.uid()::text = id);
+--
+-- -- 2. Wallets: Solo el usuario autenticado puede ver y modificar su saldo
+-- drop policy if exists "Wallets private to owner" on public.wallets;
+-- create policy "Wallets private to owner" on public.wallets for all to authenticated using (auth.uid()::text = user_id) with check (auth.uid()::text = user_id);
+--
+-- -- 3. Escrows: Solo creador, contraparte o árbitro tienen visibilidad y control
+-- drop policy if exists "Escrow visible to participants" on public.escrows;
+-- create policy "Escrow visible to participants" on public.escrows for select to authenticated using (auth.uid()::text = creador_id or auth.uid()::text = contraparte_id);
+-- drop policy if exists "Escrow editable by participants" on public.escrows;
+-- create policy "Escrow editable by participants" on public.escrows for update to authenticated using (auth.uid()::text = creador_id or auth.uid()::text = contraparte_id);
+--
+-- -- 4. P2P: Órdenes públicas para lectura; creación/cancelación restringida al maker
+-- drop policy if exists "P2P public view" on public.p2p_operations;
+-- create policy "P2P public view" on public.p2p_operations for select to authenticated using (true);
+-- drop policy if exists "P2P insert by maker" on public.p2p_operations;
+-- create policy "P2P insert by maker" on public.p2p_operations for insert to authenticated with check (auth.uid()::text = maker_id);
+-- drop policy if exists "P2P update by participants" on public.p2p_operations;
+-- create policy "P2P update by participants" on public.p2p_operations for update to authenticated using (auth.uid()::text = maker_id or estado = 'OPEN');
+--
+-- -- 5. Presencia y Chat: Escritura solo para el usuario en sesión
+-- drop policy if exists "Presence view" on public.room_presence;
+-- create policy "Presence view" on public.room_presence for select to authenticated using (true);
+-- drop policy if exists "Presence upsert by owner" on public.room_presence;
+-- create policy "Presence upsert by owner" on public.room_presence for all to authenticated using (auth.uid()::text = user_id) with check (auth.uid()::text = user_id);
+
 
 -- =============================================================================
 -- DATOS SEMILLA INICIALES (Idénticos a MockShestApi)

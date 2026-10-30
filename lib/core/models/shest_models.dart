@@ -150,6 +150,20 @@ class WalletInfo {
   final double usdtBalance;
   final String trc20Address;
   final List<String> recentTransactions;
+
+  WalletInfo copyWith({
+    String? userId,
+    double? usdtBalance,
+    String? trc20Address,
+    List<String>? recentTransactions,
+  }) {
+    return WalletInfo(
+      userId: userId ?? this.userId,
+      usdtBalance: usdtBalance ?? this.usdtBalance,
+      trc20Address: trc20Address ?? this.trc20Address,
+      recentTransactions: recentTransactions ?? this.recentTransactions,
+    );
+  }
 }
 
 /// Operación de Escrow gestionada por Shest API (Fases 19-24).
@@ -183,6 +197,20 @@ class EscrowOperation {
   final List<String> historyLog;
 
   String get qrPayload => 'SHEST-ESCROW:$id:$amount:$currency:${status.apiValue}';
+
+  bool isCreator(String userId) => creatorId == userId;
+  bool isCounterparty(String userId) => counterpartyId == userId;
+  bool isParticipant(String userId) => isCreator(userId) || isCounterparty(userId);
+
+  bool get isPending => status == EscrowStatus.pending;
+  bool get isFunded => status == EscrowStatus.funded;
+  bool get isInProgress => status == EscrowStatus.inProgress;
+  bool get isReleaseRequested => status == EscrowStatus.releaseRequested;
+  bool get isReleased => status == EscrowStatus.released;
+  bool get isCompleted => status == EscrowStatus.completed;
+  bool get isDisputed => status == EscrowStatus.disputed;
+  bool get isCancelled => status == EscrowStatus.cancelled;
+  bool get isTerminal => isCompleted || isCancelled;
 
   EscrowOperation copyWith({
     EscrowStatus? status,
@@ -234,7 +262,44 @@ class WordverseMeeting {
   String get qrPayload => 'SHEST-MEETING:$code:$id:${type.label}';
 }
 
-/// Operación P2P delegada a Shest API (Fase 18).
+/// Tipo de orden en el libro de ofertas P2P (Fase 4 — WV-401).
+enum P2POperationType {
+  buy('BUY', 'Compra USDT', '🟢 Compra'),
+  sell('SELL', 'Venta USDT', '🔵 Venta');
+
+  const P2POperationType(this.code, this.label, this.badge);
+  final String code;
+  final String label;
+  final String badge;
+
+  static P2POperationType fromCode(String? code) {
+    if (code == null) return P2POperationType.sell;
+    final String clean = code.trim().toUpperCase();
+    if (clean == 'BUY' || clean == 'COMPRA') return P2POperationType.buy;
+    return P2POperationType.sell;
+  }
+}
+
+/// Métodos de pago estándar soportados por el mercado P2P de Shest (Fase 4 — WV-401).
+enum P2PPaymentMethod {
+  bankWire('WIRE', 'Transferencia Bancaria / Wire'),
+  instantShest('INSTANT_SHEST', 'Liquidación Inmediata Shest'),
+  zelleAch('ZELLE_ACH', 'Zelle / ACH'),
+  cryptoTrc20('CRYPTO_TRC20', 'TRC20 Directo');
+
+  const P2PPaymentMethod(this.code, this.label);
+  final String code;
+  final String label;
+
+  static const List<String> commonMethods = <String>[
+    'Transferencia Bancaria / Wire',
+    'Liquidación Inmediata Shest',
+    'Zelle / ACH',
+    'TRC20 Directo',
+  ];
+}
+
+/// Operación P2P delegada a Shest API (Fases 18 y 4 — WV-401).
 class P2POperation {
   const P2POperation({
     required this.id,
@@ -244,7 +309,18 @@ class P2POperation {
     required this.rateUsd,
     required this.paymentMethod,
     required this.status,
-  });
+    this.type = P2POperationType.sell,
+    double? minAmountUsdt,
+    double? maxAmountUsdt,
+    this.reputationScore = 99.2,
+    this.completedTradesCount = 35,
+    this.fiatCurrency = 'USD',
+    this.takerId,
+    this.takerName,
+    this.createdAt,
+    this.notes,
+  }) : minAmountUsdt = minAmountUsdt ?? (amountUsdt > 50 ? 50.0 : 10.0),
+       maxAmountUsdt = maxAmountUsdt ?? amountUsdt;
 
   final String id;
   final String makerId;
@@ -253,6 +329,63 @@ class P2POperation {
   final double rateUsd;
   final String paymentMethod;
   final String status; // OPEN, IN_PROGRESS, COMPLETED, CANCELLED
+  final P2POperationType type;
+  final double minAmountUsdt;
+  final double maxAmountUsdt;
+  final double reputationScore;
+  final int completedTradesCount;
+  final String fiatCurrency;
+  final String? takerId;
+  final String? takerName;
+  final DateTime? createdAt;
+  final String? notes;
+
+  double get totalFiat => amountUsdt * rateUsd;
+  bool get isOpen => status.toUpperCase() == 'OPEN';
+  bool get isCompleted => status.toUpperCase() == 'COMPLETED';
+  bool get isCancelled => status.toUpperCase() == 'CANCELLED';
+
+  bool isMaker(String userId) => makerId == userId;
+
+  P2POperation copyWith({
+    String? id,
+    String? makerId,
+    String? makerName,
+    double? amountUsdt,
+    double? rateUsd,
+    String? paymentMethod,
+    String? status,
+    P2POperationType? type,
+    double? minAmountUsdt,
+    double? maxAmountUsdt,
+    double? reputationScore,
+    int? completedTradesCount,
+    String? fiatCurrency,
+    String? takerId,
+    String? takerName,
+    DateTime? createdAt,
+    String? notes,
+  }) {
+    return P2POperation(
+      id: id ?? this.id,
+      makerId: makerId ?? this.makerId,
+      makerName: makerName ?? this.makerName,
+      amountUsdt: amountUsdt ?? this.amountUsdt,
+      rateUsd: rateUsd ?? this.rateUsd,
+      paymentMethod: paymentMethod ?? this.paymentMethod,
+      status: status ?? this.status,
+      type: type ?? this.type,
+      minAmountUsdt: minAmountUsdt ?? this.minAmountUsdt,
+      maxAmountUsdt: maxAmountUsdt ?? this.maxAmountUsdt,
+      reputationScore: reputationScore ?? this.reputationScore,
+      completedTradesCount: completedTradesCount ?? this.completedTradesCount,
+      fiatCurrency: fiatCurrency ?? this.fiatCurrency,
+      takerId: takerId ?? this.takerId,
+      takerName: takerName ?? this.takerName,
+      createdAt: createdAt ?? this.createdAt,
+      notes: notes ?? this.notes,
+    );
+  }
 }
 
 /// Pago procesado por Shest API (Fase 26).
@@ -297,16 +430,32 @@ class WordverseChatMessage {
   final DateTime sentAt;
 }
 
-/// Excepción tipada para manejo de errores de Shest API (Fase 34).
+/// Excepción tipada para manejo de errores y trazabilidad de Shest API (Fase 1 y Fase 34).
 class ShestApiException implements Exception {
   const ShestApiException({
     required this.code,
     required this.userMessage,
+    this.statusCode,
+    this.traceId,
   });
 
   final String code;
   final String userMessage;
+  final int? statusCode;
+  final String? traceId;
+
+  bool get isUnauthorized => statusCode == 401 || statusCode == 403 || code == 'UNAUTHORIZED';
+
+  bool get isRetryable =>
+      code == 'NETWORK_OFFLINE' ||
+      statusCode == 408 ||
+      statusCode == 429 ||
+      (statusCode != null && statusCode! >= 500);
 
   @override
-  String toString() => '[$code] $userMessage';
+  String toString() {
+    final String httpPart = statusCode != null ? ' HTTP $statusCode' : '';
+    final String tracePart = traceId != null ? ' ($traceId)' : '';
+    return '[$code$httpPart]$tracePart $userMessage';
+  }
 }
